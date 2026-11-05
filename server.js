@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Game } = require('./game');
+const { botStep, botBids } = require('./bots');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -89,6 +90,8 @@ wss.on('connection', (ws) => {
       const g = room.game;
       switch (m.t) {
         case 'start': g.start(pid, m.minutes); break;
+        case 'addBot': g.addBot(pid); break;
+        case 'removeBot': g.removeBot(pid, m.id); break;
         case 'leave': g.removePlayer(pid); room.sockets.delete(ws); pid = null; break;
         case 'roll': g.roll(pid); break;
         case 'endTurn': g.endTurn(pid); break;
@@ -100,6 +103,9 @@ wss.on('connection', (ws) => {
         case 'offer': g.placeOffer(pid, m.company, m.shares, m.price); break;
         case 'cancelOffer': g.cancelOffer(pid, m.id); break;
         case 'buyOffer': g.buyOffer(pid, m.id); break;
+        case 'rumor': g.rumor(pid, m.company, m.dir); break;
+        case 'skipRumor': g.skipRumor(pid); break;
+        case 'bid': g.bid(pid, m.amount); break;
         case 'ping': return;
         default: throw new Error('Неизвестное действие');
       }
@@ -122,6 +128,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, r] of rooms) {
     const g = r.game;
+    try { if (g.tickAuction(now)) broadcast(r); } catch (e) { console.error('tickAuction', e); }
     try { if (g.autoTimeout(now)) broadcast(r); } catch (e) { console.error('autoTimeout', e); }
     if (g.phase !== 'lobby' && g.phase !== 'over' && g.endsAt && now >= g.endsAt) {
       g.finishByTime();
@@ -130,5 +137,34 @@ setInterval(() => {
     if (r.sockets.size === 0 && now - r.touched > 6 * 3600 * 1000) rooms.delete(code);
   }
 }, 1000);
+
+// Боты: каждые 0,4 с смотрим, не пора ли кому-то из ботов действовать. Между действиями — паузы,
+// чтобы люди видели, что делает бот.
+setInterval(() => {
+  const now = Date.now();
+  for (const r of rooms.values()) {
+    const g = r.game;
+    if (g.phase !== 'roll' && g.phase !== 'action') continue;
+    const turnKey = g.globalTurn;
+    if (r.botTurnKey !== turnKey) {         // ход только что перешёл — небольшая пауза перед ботом
+      r.botTurnKey = turnKey;
+      r.botWait = now + 1200;
+    }
+    if (now < (r.botWait || 0)) continue;
+    try {
+      if (g.auction && botBids(g)) { r.botWait = now + 900; broadcast(r); continue; }
+      const pause = botStep(g);
+      if (pause !== null) { r.botWait = now + pause; broadcast(r); }
+    } catch (e) {
+      console.error('bot', e.message);
+      // бот запутался — просто передаём ход дальше, чтобы игра не встала
+      try {
+        const cur = g.current();
+        if (cur && cur.isBot) { g.turn.newsChoice = null; g.turn.extraRoll = false; if (g.auction) g.resolveAuction(); g.advance(); broadcast(r); }
+      } catch (e2) { console.error('bot fallback', e2.message); }
+      r.botWait = now + 1500;
+    }
+  }
+}, 400);
 
 server.listen(PORT, () => console.log(`Биржа запущена: http://localhost:${PORT}`));

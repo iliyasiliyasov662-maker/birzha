@@ -11,11 +11,15 @@ const CONFIG = {
   winCash: 400000,        // победа наличными
   winCapital: 500000,     // победа общим капиталом
   turnSeconds: 90,        // время на ход; потом кубики бросаются сами и ход заканчивается
+  dividendRate: 0.05,     // клетка «Дивиденды»: 5% от стоимости всех своих долей
+  rumorEffect: 0.10,      // клетка «Слух»: бесплатно ±10% к цене любой компании
+  auctionSeconds: 25,     // клетка «Аукцион»: сколько секунд идут тайные ставки
+  auctionMinRate: 0.5,    // минимальная ставка — половина рыночной цены доли
   doublesForNews: 3,      // дубль = ещё один ход; третий дубль подряд = вместо хода секретная новость
   driftPct: 0.05,         // в начале каждого круга все цены сами меняются на случайные −5%…+5%
   driftUp: 0.03,          // общий рост рынка за круг: в среднем +3% к каждой цене
   marketEventChance: 0.4, // шанс общего события рынка в начале круга
-  rentRate: 0.05,         // аренда = 5% от цены компании
+  rentRate: 0.15,         // аренда = 15% от цены компании (делится между владельцами по долям)
   bankLimitShares: 2,     // у банка можно купить максимум 2 доли (20%) одной компании
   lobbyRate: 0.03,        // лоббирование стоит 3% от цены компании
   lobbyEffect: 0.15,      // при успехе цена меняется на 15%
@@ -49,15 +53,15 @@ const BOARD = [
   { type: 'company', id: 'coke',     name: 'Coca-Cola',     industry: 'drinks', price: 140000 },
   { type: 'company', id: 'pepsi',    name: 'Pepsi',         industry: 'drinks', price: 130000 },
   { type: 'tax' },
-  { type: 'insider' },
+  { type: 'exchange' },
   { type: 'company', id: 'nike',     name: 'Nike',          industry: 'wear',   price: 160000 },
   { type: 'company', id: 'adidas',   name: 'Adidas',        industry: 'wear',   price: 150000 },
-  { type: 'news' },
+  { type: 'auction' },
   { type: 'company', id: 'toyota',   name: 'Toyota',        industry: 'cars',   price: 180000 },
   { type: 'company', id: 'bmw',      name: 'BMW',           industry: 'cars',   price: 200000 },
   { type: 'company', id: 'mercedes', name: 'Mercedes-Benz', industry: 'cars',   price: 220000 },
   { type: 'bankdeal' },
-  { type: 'exchange' },
+  { type: 'audit' },
   { type: 'company', id: 'chanel',   name: 'Chanel',        industry: 'scent',  price: 240000 },
   { type: 'company', id: 'dior',     name: 'Dior',          industry: 'scent',  price: 230000 },
   { type: 'news' },
@@ -65,14 +69,14 @@ const BOARD = [
   { type: 'company', id: 'google',   name: 'Google',        industry: 'tech',   price: 300000 },
   { type: 'company', id: 'apple',    name: 'Apple',         industry: 'tech',   price: 320000 },
   { type: 'tax' },
-  { type: 'audit' },
+  { type: 'exchange' },
   { type: 'company', id: 'netflix',  name: 'Netflix',       industry: 'stream', price: 340000 },
   { type: 'company', id: 'spotify',  name: 'Spotify',       industry: 'stream', price: 330000 },
-  { type: 'news' },
+  { type: 'rumor' },
   { type: 'company', id: 'shell',    name: 'Shell',         industry: 'oil',    price: 360000 },
   { type: 'company', id: 'bp',       name: 'BP',            industry: 'oil',    price: 350000 },
   { type: 'company', id: 'exxon',    name: 'ExxonMobil',    industry: 'oil',    price: 400000 },
-  { type: 'bankdeal' },
+  { type: 'dividends' },
 ];
 
 // Общие события рынка: случаются сами в начале круга, их никто не выбирает и не знает заранее.
@@ -98,7 +102,9 @@ const MARKET_EVENTS = [
   { industry: 'oil',    pct: -0.12, title: 'Зелёная энергетика',         text: 'Нефтяные компании дешевеют на 12%.' },
 ];
 
-const PLAYER_COLORS =['#4c8dff', '#f08c00', '#3fb950', '#ff6b62', '#b197fc'];
+const BOT_NAMES = ['Бот Боря', 'Бот Вера', 'Бот Гоша', 'Бот Даша', 'Бот Женя'];
+
+const PLAYER_COLORS = ['#4c8dff', '#f08c00', '#3fb950', '#ff6b62', '#b197fc'];
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const roundTo = (x, step = 100) => Math.round(x / step) * step;
@@ -132,13 +138,14 @@ class Game {
     this.turnDeadline = null;
     this.lastMove = null;           // для анимации: кто, откуда, куда, какие кубики
     this.marketEvent = null;        // последнее общее событие рынка
+    this.auction = null;            // идущий аукцион: { companyId, minBid, endsAt, bids: {pid: сумма, 0 = пас} }
     this.nextId = 1;
     this.turn = this.freshTurn();
   }
 
   freshTurn() {
     // doubles — сколько дублей подряд выпало в этот ход; extraRoll — игрок обязан бросить ещё раз
-    return { rolled: false, lobbied: false, newsChoice: null, boughtShares: {}, landedOn: null, doubles: 0, extraRoll: false };
+    return { rolled: false, lobbied: false, newsChoice: null, boughtShares: {}, landedOn: null, doubles: 0, extraRoll: false, rumor: false };
   }
 
   // ---------- Игроки ----------
@@ -154,6 +161,23 @@ class Game {
     this.players.push(p);
     if (!this.hostId) this.hostId = id;
     return p;
+  }
+
+  addBot(byId) {
+    if (byId !== this.hostId) throw new Error('Добавлять ботов может только создатель комнаты');
+    const used = new Set(this.players.map((p) => p.name));
+    const name = BOT_NAMES.find((n) => !used.has(n)) || 'Бот';
+    const p = this.addPlayer('bot-' + this.nextId++, name);
+    p.isBot = true;
+    p.online = true;
+    return p;
+  }
+
+  removeBot(byId, botId) {
+    if (byId !== this.hostId) throw new Error('Убирать ботов может только создатель комнаты');
+    const p = this.player(botId);
+    if (!p || !p.isBot) throw new Error('Это не бот');
+    this.removePlayer(botId);
   }
 
   removePlayer(id) {
@@ -288,6 +312,7 @@ class Game {
     this.requireTurn(pid);
     if (this.turn.rolled && !this.turn.extraRoll) throw new Error('Вы уже бросили кубики');
     if (this.turn.newsChoice) throw new Error('Сначала выберите новость');
+    if (this.auction) throw new Error('Дождитесь конца аукциона');
     const p = this.current();
     const d1 = rnd(6) + 1, d2 = rnd(6) + 1;
     this.dice = [d1, d2];
@@ -377,11 +402,25 @@ class Game {
         ev('Налоговая проверка', `налоговая проверка: −${fmt(paid)} (10% от стоимости долей)`);
         break;
       }
-      case 'insider': {
-        for (const n of this.news) if (!n.knownBy.includes(p.id)) n.knownBy.push(p.id);
-        ev('Инсайдер', this.news.length
-          ? `подсмотрел все секретные новости (${this.news.length})`
-          : 'зашёл к инсайдеру, но секретных новостей пока нет');
+      case 'dividends': {
+        const amount = Math.round(this.portfolioValue(p.id) * CONFIG.dividendRate / 100) * 100;
+        p.cash += amount;
+        ev('Дивиденды', amount > 0 ? `получил дивиденды +${fmt(amount)} (5% от стоимости своих долей)` : 'пришёл за дивидендами, но долей у него нет');
+        break;
+      }
+      case 'rumor': {
+        this.turn.rumor = true;
+        ev('Слух', 'может пустить слух: поднять или уронить цену любой компании на 10%');
+        break;
+      }
+      case 'auction': {
+        const free = Object.values(this.companies).filter((c) => this.bankShares(c.id) > 0);
+        if (!free.length) { ev('Аукцион', 'пришёл на аукцион, но у банка не осталось свободных долей'); break; }
+        const c = free[rnd(free.length)];
+        this.auction = { id: this.nextId++, companyId: c.id, starterId: p.id,
+          minBid: Math.round(c.price / 10 * CONFIG.auctionMinRate / 500) * 500,
+          endsAt: Date.now() + CONFIG.auctionSeconds * 1000, bids: {} };
+        ev('Аукцион', `открыл аукцион: банк продаёт 10% ${c.name}. Все делают тайные ставки`);
         break;
       }
       case 'exchange': {
@@ -396,7 +435,70 @@ class Game {
     if (!this.turn.rolled) throw new Error('Сначала бросьте кубики');
     if (this.turn.newsChoice) throw new Error('Сначала выберите новость');
     if (this.turn.extraRoll) throw new Error('У вас дубль — бросайте кубики ещё раз');
+    if (this.auction) throw new Error('Дождитесь конца аукциона');
     this.advance();
+  }
+
+  // ---------- Слух ----------
+  rumor(pid, cid, dir) {
+    this.requireTurn(pid);
+    if (!this.turn.rumor) throw new Error('Пустить слух можно, только встав на клетку «Слух»');
+    const c = this.companies[cid];
+    if (!c) throw new Error('Выберите компанию');
+    const up = dir !== 'down';
+    this.setPrice(cid, c.price * (up ? 1 + CONFIG.rumorEffect : 1 - CONFIG.rumorEffect));
+    this.turn.rumor = false;
+    this.lastEvent = { title: 'Слух', text: `${this.player(pid).name} пустил слух: ${c.name} ${up ? 'дорожает' : 'дешевеет'} на 10%, теперь ${fmt(c.price)}`, pid };
+    this.addLog(this.lastEvent.text);
+  }
+  skipRumor(pid) {
+    this.requireTurn(pid);
+    this.turn.rumor = false;
+  }
+
+  // ---------- Аукцион ----------
+  bid(pid, amount) {
+    const a = this.auction;
+    if (!a) throw new Error('Аукциона сейчас нет');
+    const p = this.player(pid);
+    if (!p || p.out) throw new Error('Вы не в игре');
+    if (pid in a.bids) throw new Error('Вы уже сделали ставку');
+    amount = Math.round(Number(amount));
+    if (amount !== 0) {
+      if (!(amount >= a.minBid)) throw new Error(`Минимальная ставка ${fmt(a.minBid)}`);
+      if (amount > p.cash) throw new Error('Столько наличных у вас нет');
+    }
+    a.bids[pid] = amount;
+    if (this.active().every((x) => x.id in a.bids)) this.resolveAuction();
+  }
+  resolveAuction() {
+    const a = this.auction;
+    if (!a) return;
+    this.auction = null;
+    const c = this.companies[a.companyId];
+    // при равных ставках выигрывает тот, кто раньше по очереди хода, начиная с открывшего аукцион
+    const order = this.players.map((p, i) => ({ p, i })).filter((x) => !x.p.out);
+    const startIdx = this.players.findIndex((p) => p.id === a.starterId);
+    order.sort((x, y) => ((x.i - startIdx + 99) % this.players.length) - ((y.i - startIdx + 99) % this.players.length));
+    const bids = order.map((x) => ({ p: x.p, v: a.bids[x.p.id] || 0 })).filter((b) => b.v > 0)
+      .sort((x, y) => y.v - x.v);
+    const reveal = order.map((x) => `${x.p.name}: ${a.bids[x.p.id] ? fmt(a.bids[x.p.id]) : 'пас'}`).join(', ');
+    const win = bids.find((b) => b.p.cash >= b.v);
+    if (!win || this.bankShares(c.id) <= 0) {
+      this.lastEvent = { title: 'Аукцион', text: `Никто не купил 10% ${c.name}. Ставки: ${reveal}`, pid: null };
+    } else {
+      win.p.cash -= win.v;
+      this.setShares(win.p.id, c.id, this.sharesOf(win.p.id, c.id) + 1);
+      if (this.current() && this.current().id === win.p.id) this.turn.boughtShares[c.id] = (this.turn.boughtShares[c.id] || 0) + 1;
+      this.lastEvent = { title: 'Аукцион', text: `${win.p.name} купил 10% ${c.name} за ${fmt(win.v)} (по рынку ${fmt(c.price / 10)}). Ставки: ${reveal}`, pid: null };
+    }
+    this.addLog(this.lastEvent.text);
+  }
+  // Время аукциона вышло — кто не поставил, тот пас
+  tickAuction(now) {
+    if (!this.auction || now < this.auction.endsAt) return false;
+    this.resolveAuction();
+    return true;
   }
 
   // Пропустить ход игрока, который отключился
@@ -450,11 +552,13 @@ class Game {
     if (!this.turnDeadline || now < this.turnDeadline) return false;
     const p = this.current();
     this.addLog(`${p.name}: время хода вышло`);
+    if (this.auction) this.resolveAuction();
     if (!this.turn.rolled) {
       this.roll(p.id);
       if (this.phase === 'over' || this.current() !== p) return true;
     }
     if (this.turn.newsChoice) this.chooseNews(p.id, rnd(this.turn.newsChoice.length));
+    if (this.auction) this.resolveAuction();
     this.advance();   // дополнительный бросок за дубль при этом сгорает
     return true;
   }
@@ -651,11 +755,11 @@ class Game {
       me: pid,
       config: { winCash: CONFIG.winCash, winCapital: CONFIG.winCapital, maxPlayers: CONFIG.maxPlayers,
         bankLimitShares: CONFIG.bankLimitShares, lobbyRate: CONFIG.lobbyRate, bankSellDiscount: CONFIG.bankSellDiscount,
-        taxCell: CONFIG.taxCell, bankDeal: CONFIG.bankDeal, salary: CONFIG.salary },
+        taxCell: CONFIG.taxCell, bankDeal: CONFIG.bankDeal, salary: CONFIG.salary, rentRate: CONFIG.rentRate },
       board: BOARD,
       industries: INDUSTRIES,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, color: p.color, cash: p.cash, pos: p.pos, out: p.out, online: p.online,
+        id: p.id, name: p.name, color: p.color, cash: p.cash, pos: p.pos, out: p.out, online: p.online, isBot: !!p.isBot,
         capital: this.capital(p.id), shares: this.portfolioValue(p.id),
         bankBought: p.bankBought,
         knowsNews: this.news.some((n) => n.chooserId === p.id),
@@ -667,8 +771,13 @@ class Game {
       dice: this.dice,
       turn: (this.current() && this.current().id === pid)
         ? this.turn
-        : { rolled: this.turn.rolled, lobbied: this.turn.lobbied, newsChoice: null, boughtShares: {}, landedOn: this.turn.landedOn, choosing: !!this.turn.newsChoice, extraRoll: this.turn.extraRoll, doubles: this.turn.doubles },
+        : { rolled: this.turn.rolled, lobbied: this.turn.lobbied, newsChoice: null, boughtShares: {}, landedOn: this.turn.landedOn, choosing: !!this.turn.newsChoice, extraRoll: this.turn.extraRoll, doubles: this.turn.doubles, rumor: this.turn.rumor },
       offers: this.offers,
+      auction: this.auction ? {
+        id: this.auction.id, companyId: this.auction.companyId, starterId: this.auction.starterId,
+        minBid: this.auction.minBid, endsAt: this.auction.endsAt,
+        bidders: Object.keys(this.auction.bids), myBid: pid in this.auction.bids ? this.auction.bids[pid] : null,
+      } : null,
       news: this.news.map((n) => {
         const known = me && n.knownBy.includes(pid);
         const turnsLeft = Math.max(0, n.triggerTurn - this.globalTurn);

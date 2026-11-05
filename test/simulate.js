@@ -29,6 +29,21 @@ function botTurn(g) {
     }
   }
   if (g.phase === 'over' || g.current().id !== pid) return;
+  // аукцион: все делают тайные ставки или пасуют
+  if (g.auction) {
+    const c = g.companies[g.auction.companyId];
+    for (const q of g.active()) {
+      if (!g.auction) break;
+      const v = Math.random() < 0.3 ? 0 : Math.min(q.cash, Math.round(c.price / 10 * (0.5 + Math.random() * 0.7)));
+      tryDo(() => g.bid(q.id, v >= g.auction.minBid ? v : 0));
+    }
+  }
+  if (g.phase === 'over' || g.current().id !== pid) return;
+  // слух: поднять компанию, где у бота больше всего долей, иначе случайную уронить
+  if (g.turn.rumor) {
+    const mine = Object.values(g.companies).filter((c) => g.sharesOf(pid, c.id) > 0);
+    if (mine.length) g.rumor(pid, mine[0].id, 'up'); else g.rumor(pid, Object.keys(g.companies)[0], 'down');
+  }
   if (g.turn.newsChoice) g.chooseNews(pid, 0);
   if (g.turn.extraRoll) return botTurn(g);   // дубль — ходит ещё раз
   g.endTurn(pid);
@@ -66,5 +81,32 @@ if (log) console.log('Как побеждали:', reasons);
 if (log) console.log('OK: правила отработали без ошибок');
   return { median: q(0.5), q1: q(0.25), q3: q(0.75), reasons };
 }
-module.exports = { runMany };
-if (require.main === module) runMany(Number(process.argv[2]) || 300);
+// Партии, где играют настоящие боты из bots.js (те же, что в игре)
+function runRealBots(N, log = true) {
+  const { botStep, botBids } = require('../bots');
+  const per = [];
+  let stuck = 0;
+  for (let i = 0; i < N; i++) {
+    const g = new Game('BOTS');
+    const n = 2 + (i % 4);
+    g.addPlayer('host', 'Хозяин');
+    g.player('host').isBot = true;
+    for (let k = 1; k < n; k++) g.addBot('host');
+    g.start('host', 600);
+    let steps = 0;
+    while (g.phase !== 'over' && steps < 20000) {
+      if (g.auction) { if (!botBids(g)) g.resolveAuction(); }
+      else if (botStep(g) === null) { stuck++; break; }
+      check(g);
+      steps++;
+    }
+    if (g.phase !== 'over') g.finishByTime();
+    per.push(g.globalTurn / n);
+  }
+  per.sort((a, b) => a - b);
+  const q = (x) => Math.round(per[Math.floor(x * (per.length - 1))]);
+  if (log) console.log(`Настоящие боты, партий ${N}: ходов на игрока — медиана ${q(0.5)}, четверть быстрее ${q(0.25)}, четверть дольше ${q(0.75)}. Зависаний: ${stuck}`);
+  return { median: q(0.5) };
+}
+module.exports = { runMany, runRealBots };
+if (require.main === module) { runMany(Number(process.argv[2]) || 300); runRealBots(Number(process.argv[2]) || 300); }

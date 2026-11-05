@@ -60,9 +60,14 @@ input,select{font-family:inherit}
 .cell{border-radius:6px;overflow:hidden;position:relative;display:flex;flex-direction:column;border:1px solid var(--line);background:var(--cell);min-width:0}
 button.cell{padding:0;color:inherit;text-align:left;font:inherit}
 button.cell:hover{border-color:#56606e}
-.cell.here{box-shadow:0 0 0 3px var(--blue)}
-.band{height:clamp(14px,2.6cqw,30px);flex:none;display:flex;align-items:center;padding:0 6px}
-.band svg{width:clamp(13px,1.9cqw,21px);height:clamp(13px,1.9cqw,21px)}
+.cell.here{box-shadow:0 0 0 3px #ffffff}
+.cell.owned{border-width:3px}
+.ownbar{display:flex;gap:1px;height:clamp(4px,1.1cqw,10px);flex:none;padding:0 2px 2px}
+.ownbar span{flex:1;background:#2c313a;border-radius:1px}
+.ctrl{display:flex}
+.ctrl svg{width:clamp(11px,1.6cqw,17px);height:clamp(11px,1.6cqw,17px)}
+.band{height:clamp(11px,2.1cqw,26px);flex:none;display:flex;align-items:center;padding:0 6px}
+.band svg{width:clamp(11px,1.7cqw,19px);height:clamp(11px,1.7cqw,19px)}
 .cbody{padding:clamp(3px,.6cqw,8px) clamp(4px,.7cqw,8px);display:flex;flex-direction:column;gap:1px;flex:1;min-height:0}
 .cname{font-size:clamp(9.5px,1.5cqw,16px);font-weight:800;line-height:1.05;hyphens:manual}
 .cprice{font-size:clamp(9.5px,1.45cqw,16px);color:var(--muted);font-variant-numeric:tabular-nums}
@@ -82,7 +87,13 @@ button.cell:hover{border-color:#56606e}
 .s-tax{background:#2a1416;border-color:#5c2226}.s-tax .t1{color:#ffb3ad}.s-tax .t2{color:#ff8a80}
 .s-deal{background:#10261a;border-color:#1f5233}.s-deal .t1{color:#a7f0bb}.s-deal .t2{color:#6fdc8c}
 .s-corner{background:#252a33;border-color:var(--line2)}.s-corner .t2{color:var(--muted)}
-.s-news .token,.s-tax .token,.s-deal .token,.s-corner .token,.s-start .token{border-color:transparent}
+.s-auction{background:#221a33;border-color:#4b3a73}.s-auction .t1{color:#d0bfff}.s-auction .t2{color:#b197fc}
+.s-rumor{background:#0f2a26;border-color:#1f5a50}.s-rumor .t1{color:#96f2d7}.s-rumor .t2{color:#63e6be}
+.special .token{border-color:transparent}
+.capcard{gap:7px}
+.capcard .big{font-size:30px}
+.goal{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:8px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.goal .bar{height:7px}
 
 .center{grid-row:2 / span 7;grid-column:2 / span 7;background:var(--deep);border:1px solid var(--line);border-radius:12px;padding:clamp(16px,2.6cqw,32px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(10px,1.6cqw,18px);text-align:center;overflow:auto}
 .turnlabel{font-size:clamp(13px,1.6cqw,17px);font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
