@@ -77,6 +77,10 @@ function cellPos(i) {
 const indIcon = (ind, size = 13) => svg(IND[ind].icon, size);
 const SHY = { mcd: 'Mc\u00adDonald\u2019s', exxon: 'Exxon\u00adMobil' };
 const cellName = (c) => SHY[c.id] || c.name;
+// Короткие названия для маленького поля на телефоне
+const SHORT = { mcd: 'McD', bk: 'BK', kfc: 'KFC', coke: 'Coke', pepsi: 'Pepsi', nike: 'Nike', adidas: 'Adi', toyota: 'Toyo', bmw: 'BMW', mercedes: 'Merc',
+  chanel: 'Chnl', dior: 'Dior', samsung: 'Sams', google: 'Goog', apple: 'Apple', netflix: 'Netfx', spotify: 'Spot', shell: 'Shell', bp: 'BP', exxon: 'Exxon' };
+const isMobile = () => window.innerWidth < 760;
 const displayPos = (p) => (S.anim && S.anim.pid === p.id ? S.anim.cur : p.pos);
 const rnd6 = () => 1 + Math.floor(Math.random() * 6);
 const tokenHtml = (p, hop) => `<div class="token${hop ? ' hop' : ''}" style="background:${p.color}" title="${esc(p.name)}">${esc(p.name[0] || '?').toUpperCase()}</div>`;
@@ -183,7 +187,34 @@ function lobbyScreen() {
   </div>`;
 }
 
+function mobileGameScreen() {
+  const v = S.view;
+  const cur = pl(v.currentId);
+  const tab = S.mtab || 'turn';
+  const tabs = [['turn', 'Ход'], ['players', 'Игроки'], ['log', 'Журнал']];
+  let body = '';
+  if (tab === 'turn') body = capitalCard() + rightHtml(false);
+  if (tab === 'players') body = v.players.map((p) => playerCard(p, cur)).join('') + `<div class="hint">Победа: ${money(v.config.winCash)} наличными или ${money(v.config.winCapital)} капитала.</div>`;
+  if (tab === 'log') body = logCard();
+  const actions = centerActions();
+  const status = v.phase === 'over' ? '' : myTurn() ? '' : `<div class="m-status">Ходит <b>${esc(cur ? cur.name : '')}</b> · <span class="turn-timer">—</span></div>`;
+  return `<div class="mwrap">
+    <div class="mhead-bar">
+      <div class="logo-mark" style="width:32px;height:32px">${svg(ICONS.exchange, 18, 'currentColor')}</div>
+      <div class="mh-info"><b>Комната ${esc(v.code)}</b><span>круг ${v.round} · осталось <b id="timer" class="num">—</b></span></div>
+      <button class="btn btn-sm" data-act="copy-link">Пригласить</button>
+      <button class="btn btn-sm" data-act="rules" aria-label="Правила" style="width:36px;padding:0">?</button>
+    </div>
+    <section class="m-board" aria-label="Игровое поле">${boardHtml()}</section>
+    <div class="m-info">${centerInfo()}</div>
+    <div class="mtabs" role="tablist">${tabs.map(([k, t]) => `<button class="mtab ${tab === k ? 'on' : ''}" role="tab" aria-selected="${tab === k}" data-act="mtab" data-tab="${k}">${t}</button>`).join('')}</div>
+    <div class="m-body">${body}</div>
+    ${actions || status ? `<div class="m-actionbar">${actions || status}</div>` : ''}
+  </div>`;
+}
+
 function gameScreen() {
+  if (isMobile()) return mobileGameScreen();
   const v = S.view;
   const cur = pl(v.currentId);
   return `<div class="wrap">
@@ -273,27 +304,27 @@ function boardHtml() {
       html += `<button class="cell ${top ? 'owned' : ''} ${isMine ? 'here' : ''}" data-idx="${i}" style="${style}${ownStyle}" data-act="open" data-id="${cell.id}" aria-label="${esc(co.name)}, цена ${short(co.price)}${who ? ', владельцы: ' + esc(who) : ''}" title="${esc(who || 'Никто не владеет')}">
         <div class="band" style="background:${IND[co.industry].color}">${indIcon(co.industry)}</div>
         <div class="cbody">
-          <div class="cname">${esc(cellName(co))}</div>
-          <div class="cprice">${short(co.price)}</div>
+          <div class="cname"><span class="nfull">${esc(cellName(co))}</span><span class="nshort">${esc(SHORT[co.id] || co.name)}</span></div>
+          <div class="cprice"><span class="nfull">${short(co.price)}</span><span class="nshort">${Math.round(co.price / 1000)}к</span></div>
           <div class="cfoot">${chg(co)}${top && top.n >= 6 ? `<span class="ctrl" title="Контрольный пакет: ${esc(top.p.name)}">${svg('<path d="M3 18h18l-2-11-5 5-2-7-2 7-5-5z"/>', 14, top.p.color, 2.4)}</span>` : ''}</div>
         </div>
         <div class="ownbar" aria-hidden="true">${segs.join('')}</div>${tokens}</button>`;
     } else {
       const sp = {
-        start: ['s-start', ICONS.start, '#8fb6ff', 'СТАРТ', `+${money(v.config.salary)} зарплата`],
-        news: ['s-news', ICONS.news, '#fcc419', 'Новости', 'секретная'],
-        tax: ['s-tax', ICONS.tax, '#ff8a80', 'Налог', `−${money(v.config.taxCell)}`],
-        bankdeal: ['s-deal', ICONS.deal, '#6fdc8c', 'Сделка с банком', `+${money(v.config.bankDeal)}`],
-        auction: ['s-auction', ICONS.auction, '#b197fc', 'Аукцион', '10% с торгов'],
-        rumor: ['s-rumor', ICONS.rumor, '#63e6be', 'Слух', '±10% любой'],
-        dividends: ['s-deal', ICONS.dividends, '#6fdc8c', 'Дивиденды', '5% от долей'],
-        exchange: ['s-corner', ICONS.exchange, '#e8ebf0', 'Бирже\u00adвые торги', 'продать банку −10%'],
-        audit: ['s-corner', ICONS.audit, '#e8ebf0', 'Нало\u00adговая про\u00adверка', '−10% от долей'],
+        start: ['s-start', ICONS.start, '#8fb6ff', 'СТАРТ', `+${money(v.config.salary)} зарплата`, 'Старт'],
+        news: ['s-news', ICONS.news, '#fcc419', 'Новости', 'секретная', 'Новости'],
+        tax: ['s-tax', ICONS.tax, '#ff8a80', 'Налог', `−${money(v.config.taxCell)}`, 'Налог'],
+        bankdeal: ['s-deal', ICONS.deal, '#6fdc8c', 'Сделка с банком', `+${money(v.config.bankDeal)}`, 'Банк'],
+        auction: ['s-auction', ICONS.auction, '#b197fc', 'Аукцион', '10% с торгов', 'Аукцион'],
+        rumor: ['s-rumor', ICONS.rumor, '#63e6be', 'Слух', '±10% любой', 'Слух'],
+        dividends: ['s-deal', ICONS.dividends, '#6fdc8c', 'Дивиденды', '5% от долей', 'Дивид.'],
+        exchange: ['s-corner', ICONS.exchange, '#e8ebf0', 'Бирже\u00adвые торги', 'продать банку −10%', 'Биржа'],
+        audit: ['s-corner', ICONS.audit, '#e8ebf0', 'Нало\u00adговая про\u00adверка', '−10% от долей', 'Аудит'],
       }[cell.type];
-      html += `<div class="cell special ${sp[0]} ${isMine ? 'here' : ''}" data-idx="${i}" style="${style}">${svg(sp[1], 20, sp[2], 2.2)}<div class="t1">${sp[3]}</div><div class="t2">${sp[4]}</div>${tokens}</div>`;
+      html += `<div class="cell special ${sp[0]} ${isMine ? 'here' : ''}" data-idx="${i}" style="${style}" title="${esc(sp[3].replace(/\u00ad/g, ''))}: ${esc(sp[4])}">${svg(sp[1], 20, sp[2], 2.2)}<div class="t1"><span class="nfull">${sp[3]}</span><span class="nshort">${sp[5]}</span></div><div class="t2">${sp[4]}</div>${tokens}</div>`;
     }
   });
-  html += `<div class="center">${centerHtml()}</div></div>`;
+  html += `<div class="center">${isMobile() ? centerTop() : centerHtml()}</div></div>`;
   return html;
 }
 
@@ -303,10 +334,11 @@ const die = (n) => {
   return `<svg width="56" height="56" viewBox="0 0 100 100" role="img" aria-label="Кубик: ${n}"><rect x="5" y="5" width="90" height="90" rx="18" fill="#e8ebf0"/>${pips.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="8" fill="#0f1115"/>`).join('')}</svg>`;
 };
 
-function centerHtml() {
+// Центр поля разбит на три части: верх (круг, таймер, кубики), события и кнопки.
+// На компьютере всё внутри поля, на телефоне события идут под полем, а кнопки — в нижней панели.
+function centerTop() {
   const v = S.view;
   const cur = pl(v.currentId);
-  const my = me();
   let h = '';
   if (v.phase === 'over' && v.winner) {
     h += `<div class="winner">Победил ${esc(v.winner.name)}!</div><div class="muted">${esc(v.winner.why)}</div>
@@ -317,6 +349,12 @@ function centerHtml() {
   if (S.anim && S.anim.rolling) h += `<div class="dice rolling" id="dice">${die(rnd6())}${die(rnd6())}</div>`;
   else if (S.anim) h += `<div class="dice" id="dice">${die(S.anim.dice[0])}${die(S.anim.dice[1])}</div>`;
   else if (v.dice) h += `<div class="dice" id="dice">${die(v.dice[0])}${die(v.dice[1])}</div>`;
+  return h;
+}
+
+function centerInfo() {
+  const v = S.view;
+  let h = '';
   if (v.marketEvent && v.marketEvent.round === v.round) {
     const me2 = v.marketEvent;
     h += `<div class="marketbar">${svg(ICONS.exchange, 22, me2.up ? '#3fb950' : '#ff6b62', 2)}<div><b>Событие круга ${me2.round}: ${esc(me2.title)}.</b> ${esc(me2.text)}</div></div>`;
@@ -332,34 +370,46 @@ function centerHtml() {
       ? `<div class="newsbar">${svg(ICONS.clock, 22, '#fcc419', 2)}<div><b>${esc(n.title)} (${esc(n.effect)})</b> — ${when}. ${esc(n.text)}<br><span style="color:#e0b94c">Это знаете вы${who && who.id !== S.pid ? ` и ${esc(who.name)}` : ''}.</span></div></div>`
       : `<div class="newsbar">${svg(ICONS.clock, 22, '#fcc419', 2)}<div><b>${when[0].toUpperCase() + when.slice(1)} — новость про «${esc(v.industries[n.industry].name)}».</b> Вверх или вниз, знает только ${esc(who ? who.name : '?')}.</div></div>`;
   }
-  if (v.phase !== 'over' && !S.anim) {
-    let a = '';
-    if (myTurn()) {
-      if (!v.turn.rolled) a += '<button class="btn btn-primary btn-big" data-act="roll">Бросить кубики</button>';
-      else if (v.turn.newsChoice) a += '<button class="btn btn-primary btn-big" data-act="news">Выбрать новость</button>';
-      else {
-        const cell = v.board[my.pos];
-        if (cell.type === 'company') a += `<button class="btn" data-act="open" data-id="${cell.id}">Карточка ${esc(v.companies[cell.id].name)}</button>`;
-        if (v.auction) a += '<div class="muted">Идёт аукцион…</div>';
-        else a += v.turn.extraRoll
-          ? '<button class="btn btn-primary" data-act="roll">Дубль! Бросить ещё раз</button>'
-          : '<button class="btn btn-primary" data-act="end">Завершить ход</button>';
-      }
-    } else if (cur && !cur.online) {
-      a += `<button class="btn" data-act="skip">Пропустить ход ${esc(cur.name)} (не в сети)</button>`;
-    } else if (v.turn.choosing) {
-      a += `<div class="muted">${esc(cur.name)} выбирает секретную новость…</div>`;
-    }
-    if (a) h += `<div class="center-actions">${a}</div>`;
-  }
   return h;
 }
 
-function rightHtml() {
+function centerActions() {
+  const v = S.view;
+  const cur = pl(v.currentId);
+  const my = me();
+  if (v.phase === 'over' || S.anim) return '';
+  let a = '';
+  if (myTurn()) {
+    if (!v.turn.rolled) a += '<button class="btn btn-primary btn-big" data-act="roll">Бросить кубики</button>';
+    else if (v.turn.newsChoice) a += '<button class="btn btn-primary btn-big" data-act="news">Выбрать новость</button>';
+    else {
+      const cell = v.board[my.pos];
+      if (cell.type === 'company') a += `<button class="btn" data-act="open" data-id="${cell.id}">Карточка ${esc(v.companies[cell.id].name)}</button>`;
+      if (v.auction) a += '<div class="muted">Идёт аукцион…</div>';
+      else a += v.turn.extraRoll
+        ? '<button class="btn btn-primary" data-act="roll">Дубль! Бросить ещё раз</button>'
+        : '<button class="btn btn-primary" data-act="end">Завершить ход</button>';
+    }
+  } else if (cur && !cur.online) {
+    a += `<button class="btn" data-act="skip">Пропустить ход ${esc(cur.name)} (не в сети)</button>`;
+  } else if (v.turn.choosing) {
+    a += `<div class="muted">${esc(cur.name)} выбирает секретную новость…</div>`;
+  }
+  return a;
+}
+
+function centerHtml() {
+  const a = centerActions();
+  return centerTop() + centerInfo() + (a ? `<div class="center-actions">${a}</div>` : '');
+}
+
+const logCard = () => `<div class="card"><div class="h">Журнал</div><div class="log">${[...S.view.log].reverse().map((l) => `<div>${esc(l.text)}</div>`).join('')}</div></div>`;
+
+function rightHtml(withLog = true) {
   const v = S.view;
   const my = me();
   if (!my) return '<div class="card">Вы наблюдаете за игрой</div>';
-  let h = `<div class="card"><div class="h">Журнал</div><div class="log">${[...v.log].reverse().map((l) => `<div>${esc(l.text)}</div>`).join('')}</div></div>`;
+  let h = withLog ? logCard() : '';
 
   // Действия на клетке
   let act = '';
@@ -489,7 +539,7 @@ function companyModal(cid) {
           <div class="bigicon" style="background:${ind.color}">${indIcon(c.industry, 32)}</div>
           <div>
             <div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:${ind.label}">${esc(v.industries[c.industry].name.toUpperCase())}</div>
-            <div style="font-size:34px;font-weight:800;letter-spacing:-.02em;line-height:1.05">${esc(c.name)}</div>
+            <div style="font-size:clamp(24px,6vw,34px);font-weight:800;letter-spacing:-.02em;line-height:1.05">${esc(c.name)}</div>
             <div class="num" style="margin-top:4px"><span style="font-size:22px;font-weight:800">${money(c.price)}</span> &nbsp;${chg(c)} <span class="muted">с начала игры</span></div>
           </div>
         </div>
@@ -537,7 +587,7 @@ function newsModal() {
   const opts = v.turn.newsChoice || [];
   return `<div class="overlay"><div class="modal" role="dialog" aria-label="Выбор секретной новости"><div class="mbody">
     <div class="mhead"><div><div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:#fcc419">КЛЕТКА «НОВОСТИ»</div>
-      <div style="font-size:28px;font-weight:800;letter-spacing:-.02em">Выберите, что случится через 2 круга</div></div>
+      <div style="font-size:clamp(20px,5.5vw,28px);font-weight:800;letter-spacing:-.02em">Выберите, что случится через 2 круга</div></div>
       <span class="tag tag-yellow" style="font-size:13px;padding:8px 14px">Видите только вы</span></div>
     <div class="newsgrid">${opts.map((o, i) => `<div class="ncard">
       <div style="display:flex;align-items:center;gap:8px"><span class="ico" style="width:28px;height:28px;border-radius:7px;background:${IND[o.industry].color};display:flex;align-items:center;justify-content:center">${indIcon(o.industry, 16)}</span><span style="font-size:12px;font-weight:700;letter-spacing:.06em;color:${IND[o.industry].label}">${esc(v.industries[o.industry].name.toUpperCase())}</span></div>
@@ -655,6 +705,7 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'rules': S.modal = { type: 'rules' }; render(); break;
+    case 'mtab': S.mtab = t.dataset.tab; render(); break;
     case 'roll': send({ t: 'roll' }); break;
     case 'end': send({ t: 'endTurn' }); break;
     case 'skip': send({ t: 'skipTurn' }); break;
@@ -681,6 +732,12 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.modal && S.modal.type !== 'news') { S.modal = null; render(); }
+});
+
+// При повороте телефона или изменении окна переключаемся между раскладками
+let wasMobile = isMobile();
+window.addEventListener('resize', () => {
+  if (isMobile() !== wasMobile) { wasMobile = isMobile(); render(); }
 });
 
 render();

@@ -157,3 +157,67 @@ button.cell:hover{border-color:#56606e}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2a1416;border:1px solid #5c2226;color:#ffb3ad;padding:12px 18px;border-radius:10px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;max-width:90vw}
 .toast.show{opacity:1}
 .toast.ok{background:#10261a;border-color:#1f5233;color:#a7f0bb}
+
+/* ---------- Телефон ---------- */
+.nshort{display:none}
+.mwrap{padding:10px 10px 92px;display:flex;flex-direction:column;gap:10px}
+.mhead-bar{display:flex;align-items:center;gap:8px}
+.mh-info{flex:1;min-width:0;display:flex;flex-direction:column;font-size:13px;color:var(--muted);line-height:1.25}
+.mh-info b{color:var(--text)}
+.m-board .board{width:100%;min-width:0;padding:4px;gap:2px;border-radius:12px}
+.m-info{display:flex;flex-direction:column;gap:8px}
+.m-info:empty{display:none}
+.m-info .event,.m-info .newsbar,.m-info .marketbar{max-width:none}
+.mtabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;position:sticky;top:6px;z-index:5}
+.mtab{height:42px;border:none;border-radius:9px;background:transparent;color:var(--muted);font-family:inherit;font-weight:700;font-size:15px}
+.mtab.on{background:var(--cell);color:var(--text)}
+.m-body{display:flex;flex-direction:column;gap:10px}
+.m-actionbar{position:fixed;left:0;right:0;bottom:0;z-index:8;background:rgba(15,17,21,.96);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;backdrop-filter:blur(6px)}
+.m-actionbar .btn{flex:1;height:52px;font-size:16px}
+.m-actionbar .btn-big{width:auto}
+.m-actionbar .muted{flex:1;text-align:center}
+.m-status{flex:1;text-align:center;color:var(--muted);font-size:15px;padding:14px 0}
+.m-status b{color:var(--text)}
+
+/* Маленькое поле (телефон): короткие подписи, без процентов */
+@container (max-width: 560px){
+  .nfull{display:none}
+  .nshort{display:inline}
+  .cfoot{display:none}
+  .special .t2{display:none}
+  .special{gap:1px;padding:1px}
+  .special > svg{width:14px;height:14px}
+  .special .t1{font-size:7.5px;line-height:1}
+  .cname{font-size:9px;line-height:1.05}
+  .cprice{font-size:8.5px}
+  .band{height:8px;padding:0 2px}
+  .band svg{display:none}
+  .cbody{padding:2px 3px 1px;gap:0}
+  .tokens{top:auto;bottom:5px;right:1px}
+  .token{width:14px;height:14px;font-size:8px;border-width:1px}
+  .ownbar{height:4px;padding:0 1px 1px}
+  .cell.owned{border-width:2px}
+  .cell.here{box-shadow:0 0 0 2px #ffffff}
+  .center{padding:6px;gap:6px;border-radius:8px}
+  .turnlabel{font-size:10px;letter-spacing:.04em}
+  .dice{gap:8px}
+  .dice svg{width:40px;height:40px}
+  .winner{font-size:16px}
+}
+
+@media (max-width: 600px){
+  .overlay{padding:8px}
+  .mbody{padding:16px;gap:14px}
+  .bigicon{width:46px;height:46px}
+  .modal{max-height:96vh}
+  .mhead .stat{padding:8px 10px}
+  .mhead .stat .s2{font-size:15px}
+  .grid2{grid-template-columns:1fr}
+  .newsgrid{grid-template-columns:1fr}
+  .ncard .eff{font-size:22px}
+  .lobby{margin:3vh auto;padding:16px}
+  .lobby h1{font-size:28px}
+}
+/* чтобы поля ввода и блоки не распирали окна на узком экране */
+.grid2 > *,.row > *{min-width:0}
+.field .input,.box .input{width:100%;min-width:0}
