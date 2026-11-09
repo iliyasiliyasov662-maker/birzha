@@ -64,15 +64,17 @@ function sellable(cid) {
   return Math.max(0, sharesOf(S.pid, cid) - locked - listed);
 }
 // «Старт» — левый верхний угол, дальше по часовой стрелке: вправо по верху, вниз справа, влево по низу, вверх слева
+// side — клеток между углами, G — размер сетки (у нас 28 клеток: по 6 на сторону, сетка 8×8)
 function cellPos(i) {
+  const n = S.view.board.length, side = n / 4, G = side + 1;
   if (i === 0) return [1, 1];
-  if (i < 8) return [1, 1 + i];
-  if (i === 8) return [1, 9];
-  if (i < 16) return [1 + (i - 8), 9];
-  if (i === 16) return [9, 9];
-  if (i < 24) return [9, 9 - (i - 16)];
-  if (i === 24) return [9, 1];
-  return [9 - (i - 24), 1];
+  if (i < side) return [1, 1 + i];
+  if (i === side) return [1, G];
+  if (i < 2 * side) return [1 + (i - side), G];
+  if (i === 2 * side) return [G, G];
+  if (i < 3 * side) return [G, G - (i - 2 * side)];
+  if (i === 3 * side) return [G, 1];
+  return [G - (i - 3 * side), 1];
 }
 const indIcon = (ind, size = 13) => svg(IND[ind].icon, size);
 const SHY = { mcd: 'Mc\u00adDonald\u2019s', exxon: 'Exxon\u00adMobil' };
@@ -135,7 +137,7 @@ setInterval(() => send({ t: 'ping' }), 25000);
 function render() {
   // сохраняем то, что игрок печатает, чтобы обновление не стирало ввод
   const keep = {};
-  for (const id of ['name-input', 'sell-price', 'sell-shares', 'bid-input', 'rumor-company']) {
+  for (const id of ['name-input', 'sell-price', 'sell-shares', 'rumor-company', 'trade-cash']) {
     const el = document.getElementById(id);
     if (el) keep[id] = { v: el.value, f: document.activeElement === el };
   }
@@ -260,10 +262,23 @@ function playerCard(p, cur) {
     : !p.online ? '<span class="tag tag-grey">не в сети</span>' : '';
   const capPct = Math.min(100, Math.round(p.capital / v.config.winCapital * 100));
   return `<div class="card pcard ${isTurn ? 'turn' : ''} ${p.out ? 'out' : ''}">
-    <div class="prow">${avatar(p, 30)}<div class="pname">${esc(p.name)}${p.id === S.pid ? ' (вы)' : ''}</div>${p.isBot && !isTurn ? '<span class="tag tag-grey">бот</span>' : ''}${tag}</div>
+    <div class="prow">${avatar(p, 30)}<div class="pname">${esc(p.name)}${p.id === S.pid ? ' (вы)' : ''}</div>${p.isBot && !isTurn ? '<span class="tag tag-grey">бот</span>' : ''}${tag}${p.id !== S.pid && !p.out && S.view.phase !== 'over' && me() && !me().out ? `<button class="btn btn-sm" data-act="tradeOpen" data-to="${p.id}" title="Предложить обмен" aria-label="Предложить обмен игроку ${esc(p.name)}" style="height:30px;padding:0 9px">⇄</button>` : ''}</div>
     <div class="kv"><span>капитал <b style="color:var(--text)">${money(p.capital)}</b></span><span class="muted">нал. ${money(p.cash)}</span></div>
     <div class="bar"><div style="width:${capPct}%;background:${p.color}"></div></div>
   </div>`;
+}
+
+// Подсказка про лимит у банка: 20% за одно попадание, 30% за всю игру
+function bankLimitText(cid) {
+  const v = S.view;
+  const my = me();
+  const bought = my.bankBought[cid] || 0;
+  const visit = (v.turn.bankVisit || {})[cid] || 0;
+  if (bankShares(cid) <= 0) return 'У банка не осталось свободных долей. Покупайте у игроков.';
+  if (bought >= v.config.bankLimitShares) return `Вы уже купили у банка ${v.config.bankLimitShares * 10}% этой компании. Больше — только у игроков.`;
+  if (visit >= v.config.bankPerVisit) return `За это попадание вы уже взяли ${v.config.bankPerVisit * 10}%. Ещё ${(v.config.bankLimitShares - bought) * 10}% — когда снова встанете сюда.`;
+  const now = Math.min(v.config.bankPerVisit - visit, v.config.bankLimitShares - bought);
+  return `Сейчас можно взять ещё ${now * 10}%. Всего у банка куплено ${bought * 10}% из ${v.config.bankLimitShares * 10}% (не больше ${v.config.bankPerVisit * 10}% за одно попадание).`;
 }
 
 function capitalCard() {
@@ -284,7 +299,8 @@ function capitalCard() {
 function boardHtml() {
   const v = S.view;
   const my = me();
-  let html = '<div class="board">';
+  const G = v.board.length / 4 + 1;
+  let html = `<div class="board" style="grid-template-columns:repeat(${G},minmax(0,1fr));grid-template-rows:repeat(${G},minmax(0,1fr))">`;
   v.board.forEach((cell, i) => {
     const [r, c] = cellPos(i);
     const style = `grid-row:${r};grid-column:${c}`;
@@ -324,7 +340,7 @@ function boardHtml() {
       html += `<div class="cell special ${sp[0]} ${isMine ? 'here' : ''}" data-idx="${i}" style="${style}" title="${esc(sp[3].replace(/\u00ad/g, ''))}: ${esc(sp[4])}">${svg(sp[1], 20, sp[2], 2.2)}<div class="t1"><span class="nfull">${sp[3]}</span><span class="nshort">${sp[5]}</span></div><div class="t2">${sp[4]}</div>${tokens}</div>`;
     }
   });
-  html += `<div class="center">${isMobile() ? centerTop() : centerHtml()}</div></div>`;
+  html += `<div class="center" style="grid-row:2 / span ${G - 2};grid-column:2 / span ${G - 2}">${isMobile() ? centerTop() : centerHtml()}</div></div>`;
   return html;
 }
 
@@ -361,7 +377,7 @@ function centerInfo() {
   }
   const hideEvent = S.anim && v.lastEvent && v.lastEvent.pid === S.anim.pid;  // не раскрываем, куда придёт фишка
   if (v.lastEvent && !hideEvent) {
-    h += `<div class="event"><div class="et">${esc(v.lastEvent.title)}</div><div class="ex">${esc(v.lastEvent.text)}</div></div>`;
+    h += `<div class="event"><div class="et">${esc(v.lastEvent.title)}</div><div class="ex">${colorize(v.lastEvent.text)}</div></div>`;
   }
   for (const n of v.news) {
     const who = pl(n.chooserId);
@@ -403,7 +419,15 @@ function centerHtml() {
   return centerTop() + centerInfo() + (a ? `<div class="center-actions">${a}</div>` : '');
 }
 
-const logCard = () => `<div class="card"><div class="h">Журнал</div><div class="log">${[...S.view.log].reverse().map((l) => `<div>${esc(l.text)}</div>`).join('')}</div></div>`;
+// Имена игроков в тексте подсвечиваются их цветом
+function colorize(text) {
+  let h = esc(text);
+  const names = S.view.players.filter((p) => p.name.length >= 2).map((p) => ({ n: esc(p.name), c: p.color })).sort((a, b) => b.n.length - a.n.length);
+  names.forEach((x, i) => { h = h.split(x.n).join(`\u0001${i}\u0002`); });
+  names.forEach((x, i) => { h = h.split(`\u0001${i}\u0002`).join(`<b style="color:${x.c}">${x.n}</b>`); });
+  return h;
+}
+const logCard = () => `<div class="card"><div class="h">Журнал</div><div class="log">${[...S.view.log].reverse().map((l) => `<div>${colorize(l.text)}</div>`).join('')}</div></div>`;
 
 function rightHtml(withLog = true) {
   const v = S.view;
@@ -419,9 +443,10 @@ function rightHtml(withLog = true) {
     if (cell.type === 'company') {
       const c = v.companies[cell.id];
       const bought = my.bankBought[c.id] || 0;
-      const can = bankShares(c.id) > 0 && bought < v.config.bankLimitShares && my.cash >= c.price / 10;
+      const visit = (v.turn.bankVisit || {})[c.id] || 0;
+      const can = bankShares(c.id) > 0 && bought < v.config.bankLimitShares && visit < v.config.bankPerVisit && my.cash >= c.price / 10;
       act += `<button class="btn btn-primary btn-big" data-act="buyBank" data-id="${c.id}" ${can ? '' : 'disabled'}>Купить 10% ${esc(c.name)} · ${money(c.price / 10)}</button>
-        <div class="hint">${bankShares(c.id) <= 0 ? 'У банка не осталось свободных долей.' : `У банка вы купили ${bought * 10}% из ${v.config.bankLimitShares * 10}% возможных.`}${my.cash < c.price / 10 ? ' Не хватает наличных.' : ''}</div>`;
+        <div class="hint">${bankLimitText(c.id)}${my.cash < c.price / 10 ? ' Не хватает наличных.' : ''}</div>`;
     }
     if (cell.type === 'exchange') {
       const mine = Object.values(v.companies).filter((c) => sellable(c.id) > 0);
@@ -450,6 +475,13 @@ function rightHtml(withLog = true) {
 
   // Предложения
   h += `<div class="card"><div class="h">Продают игроки</div>${v.offers.length ? v.offers.map(offerRow).join('') : '<div class="hint">Пока никто ничего не продаёт. Выставить свою долю можно в карточке компании.</div>'}</div>`;
+  const out = (v.trades || []).find((t) => t.from === S.pid);
+  h += `<div class="card"><div class="h">Обмен</div>
+    ${out ? `<div class="hint" style="color:var(--soft)">Вы предложили обмен игроку <b style="color:${pl(out.to) ? pl(out.to).color : '#fff'}">${esc(pl(out.to) ? pl(out.to).name : '?')}</b>. Ждём ответа.</div>
+      <button class="btn btn-sm" data-act="tradeCancel" data-id="${out.id}">Отменить предложение</button>`
+      : `<div class="hint">Предложите свои доли за чужие, можно с доплатой. Другому игроку предложение всплывёт посередине экрана.</div>
+      <button class="btn btn-outline-blue" data-act="tradeOpen" ${v.phase === 'over' || my.out ? 'disabled' : ''}>Предложить обмен</button>`}
+  </div>`;
 
   return h;
 }
@@ -469,7 +501,10 @@ function offerRow(o) {
 // ---------- Окна ----------
 function modalHtml() {
   if (S.view.auction && !S.anim) return auctionModal();
+  const inc = !S.anim && (S.view.trades || []).find((t) => t.to === S.pid);
+  if (inc) return incomingTradeModal(inc);
   if (!S.modal) return '';
+  if (S.modal.type === 'trade') return tradeModal();
   if (S.modal.type === 'company') return companyModal(S.modal.id);
   if (S.modal.type === 'news') return S.anim ? '' : newsModal();
   if (S.modal.type === 'rules') return rulesModal();
@@ -483,26 +518,143 @@ function auctionModal() {
   const ind = IND[c.industry];
   const starter = pl(a.starterId);
   const my = me();
-  const canBid = my && !my.out && a.myBid === null;
+  const step = v.config.auctionStep;
+  const top = a.top;
+  const leader = top && pl(top.pid);
+  const iLead = top && top.pid === S.pid;
+  const iPassed = a.passed.includes(S.pid);
+  const iBid = a.history.some((h) => h.pid === S.pid);
+  const outbid = !iLead && iBid && !iPassed;
+  const next = top ? top.amount + step : a.minBid;
+  const canAct = my && !my.out && !iPassed && !iLead;
+  let actions;
+  if (!my || my.out) actions = '<div class="box">Вы наблюдаете за аукционом.</div>';
+  else if (iPassed) actions = '<div class="box">Вы вышли из торгов. Ждём, кто победит.</div>';
+  else if (iLead) actions = `<div class="box" style="background:#10261a;border:1px solid #1f5233;color:#a7f0bb"><b>Ваша ставка самая высокая.</b> Если 10 секунд никто не перебьёт — доля ваша.</div>`;
+  else actions = `
+    <div class="row">
+      <button class="btn btn-primary" data-act="raise" data-inc="${step}" ${my.cash >= next ? '' : 'disabled'}>${top ? `Повысить до ${money(next)}` : `Поставить ${money(next)}`}</button>
+      ${top ? `<button class="btn" data-act="raise" data-inc="1000" ${my.cash >= top.amount + 1000 ? '' : 'disabled'} style="flex:0 0 auto">+1 000 $</button>` : ''}
+    </div>
+    <button class="btn" data-act="pass">Выйти из торгов</button>`;
   return `<div class="overlay"><div class="modal" style="width:min(620px,100%)" role="dialog" aria-label="Аукцион">
     <div class="mtop" style="background:#b197fc"></div>
     <div class="mbody">
       <div class="mhead">
         <div><div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:#d0bfff">АУКЦИОН · ОТКРЫЛ ${esc((starter ? starter.name : '').toUpperCase())}</div>
-          <div style="font-size:26px;font-weight:800;letter-spacing:-.02em">Банк продаёт 10%</div></div>
-        <div class="stat"><div class="s1">Осталось</div><div class="s2 num" id="auction-timer">—</div></div>
+          <div style="font-size:clamp(20px,5.5vw,26px);font-weight:800;letter-spacing:-.02em">Банк продаёт 10%</div></div>
+        <div class="stat"><div class="s1">${top ? 'До удара молотка' : 'Ждём первую ставку'}</div><div class="s2 num" id="auction-timer">—</div></div>
       </div>
       <div style="display:flex;gap:14px;align-items:center">
         <div class="bigicon" style="background:${ind.color}">${indIcon(c.industry, 30)}</div>
         <div><div style="font-size:24px;font-weight:800">${esc(c.name)}</div>
-          <div class="muted num">10% по рынку ${money(c.price / 10)} · минимальная ставка ${money(a.minBid)}</div></div>
+          <div class="muted num">10% по рынку ${money(c.price / 10)} · стартовая цена ${money(a.minBid)}</div></div>
       </div>
-      ${canBid ? `<div class="field"><label for="bid-input">Ваша тайная ставка, $</label>
-          <input id="bid-input" class="input" type="number" min="${a.minBid}" step="500" value="${Math.round(c.price / 10 / 500) * 500}"></div>
-        <div class="row"><button class="btn btn-primary" data-act="bid">Сделать ставку</button><button class="btn" data-act="pass">Пас</button></div>`
-        : `<div class="box">${a.myBid === null ? 'Вы наблюдаете за аукционом.' : a.myBid > 0 ? `Ваша ставка: <b>${money(a.myBid)}</b>. Ждём остальных.` : 'Вы спасовали. Ждём остальных.'}</div>`}
-      <div style="display:flex;flex-wrap:wrap;gap:8px">${v.players.filter((p) => !p.out).map((p) => `<span class="tag ${a.bidders.includes(p.id) ? 'tag-grey' : ''}" style="${a.bidders.includes(p.id) ? '' : 'border:1px dashed var(--line2)'}"><span style="color:${p.color}">●</span> ${esc(p.name)} — ${a.bidders.includes(p.id) ? 'готов' : 'думает…'}</span>`).join('')}</div>
-      <div class="hint">Ставки тайные, их покажут после торгов. Побеждает самая высокая. Эта доля не считается в лимит 20% у банка.</div>
+      ${outbid ? `<div class="box" style="background:#2a1416;border:1px solid #5c2226;color:#ffb3ad"><b>Вас перебили!</b> ${esc(leader ? leader.name : '')} поставил ${money(top.amount)}. Повысите ещё?</div>` : ''}
+      <div class="box" style="text-align:center">
+        <div class="muted" style="font-size:13px">${top ? 'Текущая ставка' : 'Ставок пока нет'}</div>
+        <div class="big" style="font-size:34px">${money(top ? top.amount : a.minBid)}</div>
+        ${leader ? `<div>лидирует <b style="color:${leader.color}">${esc(leader.name)}</b></div>` : ''}
+      </div>
+      ${canAct || iLead || iPassed || !my ? actions : actions}
+      ${a.history.length ? `<div class="log" style="max-height:110px">${[...a.history].reverse().map((h) => { const p = pl(h.pid); return `<div><b style="color:${p ? p.color : '#fff'}">${esc(p ? p.name : '?')}</b> — ${money(h.amount)}</div>`; }).join('')}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:8px">${v.players.filter((p) => !p.out).map((p) => {
+        const st = a.passed.includes(p.id) ? 'пас' : top && top.pid === p.id ? 'лидер' : 'в торгах';
+        return `<span class="tag tag-grey" style="${a.passed.includes(p.id) ? 'opacity:.5' : ''}"><span style="color:${p.color}">●</span> ${esc(p.name)} — ${st}</span>`;
+      }).join('')}</div>
+      <div class="hint">Ставки видят все. Если ${10} секунд никто не повышает, лот уходит лидеру. Эта доля не считается в лимит 30% у банка.</div>
+    </div></div></div>`;
+}
+
+// ---------- Обмен ----------
+const val10 = (cid, n) => (cid ? n * S.view.companies[cid].price / 10 : 0);
+// сколько долей игрок может отдать (без выставленных на продажу); для себя ещё минус купленное в этот ход
+function freeShares(pid, cid) {
+  if (pid === S.pid) return sellable(cid);
+  const listed = S.view.offers.filter((o) => o.sellerId === pid && o.companyId === cid).reduce((a, o) => a + o.shares, 0);
+  return Math.max(0, sharesOf(pid, cid) - listed);
+}
+function tradeModal() {
+  const v = S.view;
+  const m = S.modal;
+  const others = v.players.filter((p) => !p.out && p.id !== S.pid);
+  if (!others.length) return '';
+  if (!others.find((p) => p.id === m.to)) m.to = others[0].id;
+  const partner = pl(m.to);
+  const myCos = Object.values(v.companies).filter((c) => freeShares(S.pid, c.id) > 0);
+  const theirCos = Object.values(v.companies).filter((c) => freeShares(m.to, c.id) > 0);
+  if (m.give && !myCos.find((c) => c.id === m.give)) m.give = '';
+  if (m.get && !theirCos.find((c) => c.id === m.get)) m.get = '';
+  const nOpts = (max, cur) => Array.from({ length: max }, (_, k) => `<option value="${k + 1}" ${cur === k + 1 ? 'selected' : ''}>${(k + 1) * 10}%</option>`).join('');
+  const giveMax = m.give ? freeShares(S.pid, m.give) : 0;
+  const getMax = m.get ? freeShares(m.to, m.get) : 0;
+  m.giveN = Math.min(Math.max(1, m.giveN || 1), Math.max(1, giveMax));
+  m.getN = Math.min(Math.max(1, m.getN || 1), Math.max(1, getMax));
+  return `<div class="overlay" data-act="close-bg"><div class="modal" style="width:min(640px,100%)" role="dialog" aria-label="Предложить обмен">
+    <div class="mtop" style="background:var(--blue)"></div>
+    <div class="mbody">
+      <div class="mhead"><div style="font-size:clamp(20px,5.5vw,26px);font-weight:800">Предложить обмен</div>
+        <button class="btn" data-act="close" aria-label="Закрыть" style="width:44px;padding:0">${svg(ICONS.close, 18, 'currentColor', 2.2)}</button></div>
+      <div class="field"><label for="trade-to">С кем</label>
+        <select id="trade-to" class="input">${others.map((p) => `<option value="${p.id}" ${p.id === m.to ? 'selected' : ''}>${esc(p.name)}${p.isBot ? ' (бот)' : ''}</option>`).join('')}</select></div>
+      <div class="box"><div class="h">Вы отдаёте</div>
+        <div class="row">
+          <select id="trade-give" class="input"><option value="">— ничего —</option>${myCos.map((c) => `<option value="${c.id}" ${c.id === m.give ? 'selected' : ''}>${esc(c.name)} · у вас ${sharesOf(S.pid, c.id) * 10}%</option>`).join('')}</select>
+          ${m.give ? `<select id="trade-give-n" class="input" style="flex:0 0 96px">${nOpts(giveMax, m.giveN)}</select>` : ''}
+        </div></div>
+      <div class="box"><div class="h">Вы получаете от ${esc(partner.name)}</div>
+        <div class="row">
+          <select id="trade-get" class="input"><option value="">— ничего —</option>${theirCos.map((c) => `<option value="${c.id}" ${c.id === m.get ? 'selected' : ''}>${esc(c.name)} · у него ${sharesOf(m.to, c.id) * 10}%</option>`).join('')}</select>
+          ${m.get ? `<select id="trade-get-n" class="input" style="flex:0 0 96px">${nOpts(getMax, m.getN)}</select>` : ''}
+        </div></div>
+      <div class="box"><div class="h">Доплата</div>
+        <div class="row">
+          <select id="trade-cash-dir" class="input">
+            <option value="none" ${m.dir === 'none' || !m.dir ? 'selected' : ''}>без доплаты</option>
+            <option value="me" ${m.dir === 'me' ? 'selected' : ''}>я доплачиваю</option>
+            <option value="them" ${m.dir === 'them' ? 'selected' : ''}>${esc(partner.name)} доплачивает</option>
+          </select>
+          <input id="trade-cash" class="input" type="number" min="0" step="500" value="${m.cash || 0}" ${m.dir && m.dir !== 'none' ? '' : 'disabled'} aria-label="Сумма доплаты" style="flex:0 0 130px">
+        </div>
+        <button class="btn btn-sm" data-act="tradeBalance">Уравнять доплатой</button>
+      </div>
+      <div id="trade-summary" class="box" style="background:var(--deep)">${tradeSummary()}</div>
+      <div class="row"><button class="btn btn-primary" data-act="tradeSend">Отправить предложение</button><button class="btn" data-act="close" style="flex:0 0 auto">Отмена</button></div>
+    </div></div></div>`;
+}
+function tradeCash() { const m = S.modal; return m.dir === 'me' ? (Number(m.cash) || 0) : m.dir === 'them' ? -(Number(m.cash) || 0) : 0; }
+function tradeSummary() {
+  const m = S.modal;
+  const give = val10(m.give, m.giveN || 1);
+  const get = val10(m.get, m.getN || 1);
+  const cash = tradeCash();
+  const net = get - give - cash; // плюс — выгодно вам по рыночным ценам
+  return `<div class="kv"><span>Вы отдаёте по рынку</span><b>${money(give + Math.max(0, cash))}</b></div>
+    <div class="kv"><span>Вы получаете по рынку</span><b>${money(get + Math.max(0, -cash))}</b></div>
+    <div class="kv"><span>Итого для вас</span><b class="${net > 0 ? 'up' : net < 0 ? 'down' : ''}">${net > 0 ? '+' : net < 0 ? '−' : ''}${money(Math.abs(net))}</b></div>`;
+}
+function incomingTradeModal(t) {
+  const v = S.view;
+  const from = pl(t.from);
+  const gets = val10(t.giveCid, t.giveN) + Math.max(0, t.cash);
+  const gives = val10(t.getCid, t.getN) + Math.max(0, -t.cash);
+  const net = gets - gives;
+  const line = (cid, n) => { const c = v.companies[cid]; return `<span class="ico" style="width:26px;height:26px;border-radius:7px;background:${IND[c.industry].color};display:inline-flex;align-items:center;justify-content:center;vertical-align:middle">${indIcon(c.industry, 15)}</span> <b>${n * 10}% ${esc(c.name)}</b> <span class="muted">≈ ${money(val10(cid, n))}</span>`; };
+  return `<div class="overlay"><div class="modal" style="width:min(560px,100%)" role="dialog" aria-label="Предложение обмена">
+    <div class="mtop" style="background:${from ? from.color : 'var(--blue)'}"></div>
+    <div class="mbody">
+      <div><div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--muted)">ПРЕДЛОЖЕНИЕ ОБМЕНА</div>
+        <div style="font-size:clamp(20px,5.5vw,26px);font-weight:800"><span style="color:${from ? from.color : '#fff'}">${esc(from ? from.name : '?')}</span> предлагает обмен</div></div>
+      <div class="box"><div class="h">Вы получаете</div>
+        ${t.giveCid ? `<div>${line(t.giveCid, t.giveN)}</div>` : ''}
+        ${t.cash > 0 ? `<div><b class="up">+${money(t.cash)}</b> доплата</div>` : ''}
+        ${!t.giveCid && t.cash <= 0 ? '<div class="muted">ничего</div>' : ''}</div>
+      <div class="box"><div class="h">Вы отдаёте</div>
+        ${t.getCid ? `<div>${line(t.getCid, t.getN)}</div>` : ''}
+        ${t.cash < 0 ? `<div><b class="down">−${money(-t.cash)}</b> доплата</div>` : ''}
+        ${!t.getCid && t.cash >= 0 ? '<div class="muted">ничего</div>' : ''}</div>
+      <div class="kv" style="font-size:15px"><span>По рыночным ценам для вас</span><b class="${net > 0 ? 'up' : net < 0 ? 'down' : ''}">${net > 0 ? '+' : net < 0 ? '−' : ''}${money(Math.abs(net))}</b></div>
+      <div class="row"><button class="btn btn-primary" data-act="tradeAccept" data-id="${t.id}">Принять</button><button class="btn btn-down" data-act="tradeDecline" data-id="${t.id}">Отклонить</button></div>
     </div></div></div>`;
 }
 
@@ -519,7 +671,8 @@ function companyModal(cid) {
   while (segs.length < 10) segs.push('<div class="seg free"></div>');
   const standing = my && my.pos === v.board.findIndex((b) => b.id === cid);
   const bought = my ? my.bankBought[cid] || 0 : 0;
-  const canBuyBank = myTurn() && v.turn.rolled && standing && bankShares(cid) > 0 && bought < v.config.bankLimitShares && my.cash >= c.price / 10;
+  const visit = (v.turn.bankVisit || {})[cid] || 0;
+  const canBuyBank = myTurn() && v.turn.rolled && standing && bankShares(cid) > 0 && bought < v.config.bankLimitShares && visit < v.config.bankPerVisit && my.cash >= c.price / 10;
   const lobbyCost = Math.round(c.price * v.config.lobbyRate);
   const canLobby = myTurn() && !v.turn.lobbied && my.cash >= lobbyCost;
   const offers = v.offers.filter((o) => o.companyId === cid);
@@ -527,9 +680,7 @@ function companyModal(cid) {
 
   let buyText;
   if (!standing) buyText = 'Купить у банка можно, только встав на клетку этой компании.';
-  else if (bankShares(cid) <= 0) buyText = 'У банка не осталось свободных долей. Покупайте у игроков.';
-  else if (bought >= v.config.bankLimitShares) buyText = 'Вы уже купили у банка 20% этой компании. Больше — только у игроков.';
-  else buyText = `Можно взять ещё ${(v.config.bankLimitShares - bought) * 10}%: у банка один игрок покупает не больше 20% компании.`;
+  else buyText = bankLimitText(cid);
 
   return `<div class="overlay" data-act="close-bg"><div class="modal" role="dialog" aria-label="Карточка компании ${esc(c.name)}">
     <div class="mtop" style="background:${ind.color}"></div>
@@ -607,13 +758,14 @@ function rulesModal() {
       <div><b>Время хода.</b> На ход 90 секунд. Не успели — кубики бросятся сами, и ход закончится.</div>
       <div><b>Дубли.</b> Выпали одинаковые кубики (например, 3 и 3) — после своей клетки ходите ещё раз, и на это даётся новых 90 секунд. Третий дубль подряд — фишка не идёт, вместо этого вы выбираете секретную новость, и ход заканчивается.</div>
       <div><b>Живой рынок.</b> В начале каждого круга все цены немного меняются сами (в среднем рынок растёт на 3%). Иногда случается общее событие: кризис, бум отрасли и т. п. Его никто не выбирает и не знает заранее.</div>
-      <div><b>Доли.</b> Компания делится на 10 долей по 10%. Встав на клетку, можно купить долю у банка, но не больше 20% одной компании за игру. Остальное — только у игроков.</div>
+      <div><b>Доли.</b> Компания делится на 10 долей по 10%. Встав на клетку, можно купить у банка до 20% за одно попадание, а всего не больше 30% одной компании за игру. Остальное — только у игроков: через продажу или обмен.</div>
       <div><b>Аренда.</b> Встал на клетку компании — платишь 15% её цены владельцам по их долям. Непроданная часть не платится. У кого больше 50% — аренда ×2.</div>
       <div><b>Торговля.</b> Свою долю можно выставить по любой цене в карточке компании. Купить чужое предложение можно в свой ход, где бы вы ни стояли. Купленное в этот ход продать нельзя.</div>
+      <div><b>Обмен.</b> Кнопка «Предложить обмен» или ⇄ у игрока: отдаёте свои доли за его доли, можно с доплатой в любую сторону. Видно, сколько стоит каждая сторона по рынку, и есть кнопка «Уравнять доплатой». Второму игроку предложение всплывает посередине экрана: принять или отклонить.</div>
       <div><b>Новости.</b> На клетке «Новости» выбираете одну из трёх. Она сработает через 2 круга. Текст видите только вы, остальные — лишь отрасль, без знака: вверх или вниз.</div>
       <div><b>Лоббирование.</b> Один раз за ход: платите 3% цены любой компании, бросок 4–6 — цена ±15%, 1–3 — деньги пропали.</div>
       <div><b>Углы.</b> Старт: +30 000 $ за проход. Два угла «Биржевые торги» друг напротив друга: продажа долей банку по цене −10%. Налоговая проверка: 10% от стоимости ваших долей.</div>
-      <div><b>Особые клетки.</b> Аукцион: банк продаёт 10% случайной компании, все делают тайные ставки (25 секунд), доля не считается в лимит 20%. Слух: бесплатно поднимите или уроните цену любой компании на 10%. Дивиденды: получите 5% от стоимости всех своих долей. Налог: −10 000 $. Сделка с банком: +15 000 $.</div>
+      <div><b>Особые клетки.</b> Аукцион (два на поле, друг напротив друга): банк продаёт 10% случайной компании, торги открытые — все видят ставки и повышают по 100 $ или по 1 000 $, кто не хочет — выходит. Если 10 секунд никто не повышает, лот уходит лидеру. Доля не считается в лимит 30%. Дивиденды: получите 5% от стоимости всех своих долей. Налог: −10 000 $. Сделка с банком: +15 000 $.</div>
       <div><b>Банкротство.</b> Если нечем платить, доли сами продаются банку по цене −10%. Не хватило и этого — игрок выбывает.</div>
     </div></div></div></div>`;
 }
@@ -725,11 +877,44 @@ document.addEventListener('click', (e) => {
     case 'cancelOffer': send({ t: 'cancelOffer', id: Number(id) }); break;
     case 'rumor': send({ t: 'rumor', company: document.getElementById('rumor-company').value, dir: t.dataset.dir }); break;
     case 'skipRumor': send({ t: 'skipRumor' }); break;
-    case 'bid': send({ t: 'bid', amount: Number(document.getElementById('bid-input').value) }); break;
-    case 'pass': send({ t: 'bid', amount: 0 }); break;
+    case 'raise': send({ t: 'raise', inc: Number(t.dataset.inc) }); break;
+    case 'pass': send({ t: 'pass' }); break;
+    case 'tradeOpen': S.modal = { type: 'trade', to: t.dataset.to || null, give: '', get: '', giveN: 1, getN: 1, dir: 'none', cash: 0 }; render(); break;
+    case 'tradeCancel': send({ t: 'cancelTrade', id: Number(id) }); break;
+    case 'tradeAccept': send({ t: 'respondTrade', id: Number(id), accept: true }); break;
+    case 'tradeDecline': send({ t: 'respondTrade', id: Number(id), accept: false }); break;
+    case 'tradeBalance': {
+      const m = S.modal;
+      const diff = val10(m.get, m.getN || 1) - val10(m.give, m.giveN || 1); // >0: я получаю больше — я доплачиваю
+      m.dir = diff > 0 ? 'me' : diff < 0 ? 'them' : 'none';
+      m.cash = Math.round(Math.abs(diff) / 100) * 100;
+      render();
+      break;
+    }
+    case 'tradeSend': {
+      const m = S.modal;
+      send({ t: 'proposeTrade', trade: { to: m.to, giveCid: m.give || null, giveN: m.giveN, getCid: m.get || null, getN: m.getN, cash: tradeCash() } });
+      S.modal = null; render();
+      break;
+    }
     case 'buyOffer': send({ t: 'buyOffer', id: Number(id) }); break;
   }
 });
+// Окно обмена: запоминаем выбор; при смене игрока или компании перерисовываем списки
+function onTradeInput(e) {
+  if (!S.modal || S.modal.type !== 'trade') return;
+  const m = S.modal, el = e.target;
+  const map = { 'trade-to': 'to', 'trade-give': 'give', 'trade-get': 'get', 'trade-give-n': 'giveN', 'trade-get-n': 'getN', 'trade-cash-dir': 'dir', 'trade-cash': 'cash' };
+  const key = map[el.id];
+  if (!key) return;
+  m[key] = ['giveN', 'getN', 'cash'].includes(key) ? Number(el.value) : el.value;
+  if (key === 'to') { m.get = ''; m.getN = 1; }
+  if (['to', 'give', 'get', 'dir'].includes(key)) render();
+  else { const sm = document.getElementById('trade-summary'); if (sm) sm.innerHTML = tradeSummary(); }
+}
+document.addEventListener('change', onTradeInput);
+document.addEventListener('input', (e) => { if (e.target.id === 'trade-cash') onTradeInput(e); });
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.modal && S.modal.type !== 'news') { S.modal = null; render(); }
 });

@@ -30,12 +30,29 @@ function botTurn(g) {
   }
   if (g.phase === 'over' || g.current().id !== pid) return;
   // аукцион: все делают тайные ставки или пасуют
-  if (g.auction) {
+  // открытый аукцион: игроки по кругу повышают или пасуют
+  let guard = 0;
+  while (g.auction && guard++ < 500) {
     const c = g.companies[g.auction.companyId];
     for (const q of g.active()) {
       if (!g.auction) break;
-      const v = Math.random() < 0.3 ? 0 : Math.min(q.cash, Math.round(c.price / 10 * (0.5 + Math.random() * 0.7)));
-      tryDo(() => g.bid(q.id, v >= g.auction.minBid ? v : 0));
+      if (g.auction.passed.includes(q.id) || (g.auction.top && g.auction.top.pid === q.id)) continue;
+      const next = g.auction.top ? g.auction.top.amount + 1000 : g.auction.minBid;
+      if (next <= c.price / 10 * (0.6 + Math.random() * 0.6) && next <= q.cash) tryDo(() => g.raise(q.id, 1000));
+      else tryDo(() => g.passAuction(q.id));
+    }
+  }
+  if (g.auction) g.resolveAuction();
+  // иногда предлагают обмен, получатель соглашается наугад
+  if (Math.random() < 0.1) {
+    const mine = Object.values(g.companies).filter((c) => g.sellable(pid, c.id) > 0);
+    const other = g.active().find((q) => q.id !== pid);
+    if (mine.length && other) {
+      const theirs = Object.values(g.companies).filter((c) => g.sellable(other.id, c.id) > 0);
+      tryDo(() => g.proposeTrade(pid, { to: other.id, giveCid: mine[0].id, giveN: 1, getCid: theirs.length ? theirs[0].id : null, getN: 1, cash: Math.round((Math.random() - 0.5) * 20000) }));
+      const t = g.trades.find((x) => x.from === pid);
+      if (t) tryDo(() => g.respondTrade(other.id, t.id, Math.random() < 0.5));
+      if (g.trades.find((x) => x.from === pid)) tryDo(() => g.cancelTrade(pid, t.id));
     }
   }
   if (g.phase === 'over' || g.current().id !== pid) return;
@@ -83,7 +100,7 @@ if (log) console.log('OK: правила отработали без ошибо�
 }
 // Партии, где играют настоящие боты из bots.js (те же, что в игре)
 function runRealBots(N, log = true) {
-  const { botStep, botBids } = require('../bots');
+  const { botStep, botAuctionStep, botTrades } = require('../bots');
   const per = [];
   let stuck = 0;
   for (let i = 0; i < N; i++) {
@@ -95,7 +112,8 @@ function runRealBots(N, log = true) {
     g.start('host', 600);
     let steps = 0;
     while (g.phase !== 'over' && steps < 20000) {
-      if (g.auction) { if (!botBids(g)) g.resolveAuction(); }
+      if (g.auction) { if (!botAuctionStep(g)) g.resolveAuction(); }
+      else if (botTrades(g)) { /* бот ответил на обмен */ }
       else if (botStep(g) === null) { stuck++; break; }
       check(g);
       steps++;

@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Game } = require('./game');
-const { botStep, botBids } = require('./bots');
+const { botStep, botAuctionStep, botTrades } = require('./bots');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -105,7 +105,11 @@ wss.on('connection', (ws) => {
         case 'buyOffer': g.buyOffer(pid, m.id); break;
         case 'rumor': g.rumor(pid, m.company, m.dir); break;
         case 'skipRumor': g.skipRumor(pid); break;
-        case 'bid': g.bid(pid, m.amount); break;
+        case 'raise': g.raise(pid, m.inc); break;
+        case 'pass': g.passAuction(pid); break;
+        case 'proposeTrade': g.proposeTrade(pid, m.trade); break;
+        case 'cancelTrade': g.cancelTrade(pid, m.id); break;
+        case 'respondTrade': g.respondTrade(pid, m.id, !!m.accept); break;
         case 'ping': return;
         default: throw new Error('Неизвестное действие');
       }
@@ -152,7 +156,8 @@ setInterval(() => {
     }
     if (now < (r.botWait || 0)) continue;
     try {
-      if (g.auction && botBids(g)) { r.botWait = now + 900; broadcast(r); continue; }
+      if (g.auction && botAuctionStep(g)) { r.botWait = now + 1100; broadcast(r); continue; }
+      if (botTrades(g)) { r.botWait = now + 800; broadcast(r); continue; }
       const pause = botStep(g);
       if (pause !== null) { r.botWait = now + pause; broadcast(r); }
     } catch (e) {

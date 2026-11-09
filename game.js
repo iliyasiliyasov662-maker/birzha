@@ -13,14 +13,17 @@ const CONFIG = {
   turnSeconds: 90,        // время на ход; потом кубики бросаются сами и ход заканчивается
   dividendRate: 0.05,     // клетка «Дивиденды»: 5% от стоимости всех своих долей
   rumorEffect: 0.10,      // клетка «Слух»: бесплатно ±10% к цене любой компании
-  auctionSeconds: 25,     // клетка «Аукцион»: сколько секунд идут тайные ставки
-  auctionMinRate: 0.5,    // минимальная ставка — половина рыночной цены доли
+  auctionFirstSeconds: 15, // аукцион: сколько секунд ждём первую ставку
+  auctionSeconds: 10,     // аукцион: если 10 секунд никто не повышает — лот уходит
+  auctionStep: 100,       // шаг повышения ставки
+  auctionMinRate: 0.5,    // стартовая цена лота — половина рыночной цены доли
   doublesForNews: 3,      // дубль = ещё один ход; третий дубль подряд = вместо хода секретная новость
   driftPct: 0.05,         // в начале каждого круга все цены сами меняются на случайные −5%…+5%
   driftUp: 0.03,          // общий рост рынка за круг: в среднем +3% к каждой цене
   marketEventChance: 0.4, // шанс общего события рынка в начале круга
   rentRate: 0.15,         // аренда = 15% от цены компании (делится между владельцами по долям)
-  bankLimitShares: 2,     // у банка можно купить максимум 2 доли (20%) одной компании
+  bankLimitShares: 3,     // у банка можно купить максимум 3 доли (30%) одной компании за игру…
+  bankPerVisit: 2,        // …и не больше 2 долей (20%) за одно попадание на клетку
   lobbyRate: 0.03,        // лоббирование стоит 3% от цены компании
   lobbyEffect: 0.15,      // при успехе цена меняется на 15%
   bankSellDiscount: 0.10, // продажа банку: рыночная цена минус 10%
@@ -47,7 +50,6 @@ const INDUSTRIES = {
 const BOARD = [
   { type: 'start' },
   { type: 'company', id: 'mcd',      name: "McDonald's",    industry: 'food',   price: 100000 },
-  { type: 'company', id: 'bk',       name: 'Burger King',   industry: 'food',   price: 110000 },
   { type: 'company', id: 'kfc',      name: 'KFC',           industry: 'food',   price: 120000 },
   { type: 'news' },
   { type: 'company', id: 'coke',     name: 'Coca-Cola',     industry: 'drinks', price: 140000 },
@@ -58,7 +60,6 @@ const BOARD = [
   { type: 'company', id: 'adidas',   name: 'Adidas',        industry: 'wear',   price: 150000 },
   { type: 'auction' },
   { type: 'company', id: 'toyota',   name: 'Toyota',        industry: 'cars',   price: 180000 },
-  { type: 'company', id: 'bmw',      name: 'BMW',           industry: 'cars',   price: 200000 },
   { type: 'company', id: 'mercedes', name: 'Mercedes-Benz', industry: 'cars',   price: 220000 },
   { type: 'bankdeal' },
   { type: 'audit' },
@@ -66,14 +67,12 @@ const BOARD = [
   { type: 'company', id: 'dior',     name: 'Dior',          industry: 'scent',  price: 230000 },
   { type: 'news' },
   { type: 'company', id: 'samsung',  name: 'Samsung',       industry: 'tech',   price: 260000 },
-  { type: 'company', id: 'google',   name: 'Google',        industry: 'tech',   price: 300000 },
   { type: 'company', id: 'apple',    name: 'Apple',         industry: 'tech',   price: 320000 },
   { type: 'tax' },
   { type: 'exchange' },
   { type: 'company', id: 'netflix',  name: 'Netflix',       industry: 'stream', price: 340000 },
   { type: 'company', id: 'spotify',  name: 'Spotify',       industry: 'stream', price: 330000 },
-  { type: 'rumor' },
-  { type: 'company', id: 'shell',    name: 'Shell',         industry: 'oil',    price: 360000 },
+  { type: 'auction' },
   { type: 'company', id: 'bp',       name: 'BP',            industry: 'oil',    price: 350000 },
   { type: 'company', id: 'exxon',    name: 'ExxonMobil',    industry: 'oil',    price: 400000 },
   { type: 'dividends' },
@@ -138,14 +137,15 @@ class Game {
     this.turnDeadline = null;
     this.lastMove = null;           // для анимации: кто, откуда, куда, какие кубики
     this.marketEvent = null;        // последнее общее событие рынка
-    this.auction = null;            // идущий аукцион: { companyId, minBid, endsAt, bids: {pid: сумма, 0 = пас} }
+    this.auction = null;            // идущий аукцион: { companyId, minBid, endsAt, top: {pid, amount}, passed: [pid], history }
+    this.trades = [];               // предложения обмена: { id, from, to, giveCid, giveN, getCid, getN, cash }
     this.nextId = 1;
     this.turn = this.freshTurn();
   }
 
   freshTurn() {
     // doubles — сколько дублей подряд выпало в этот ход; extraRoll — игрок обязан бросить ещё раз
-    return { rolled: false, lobbied: false, newsChoice: null, boughtShares: {}, landedOn: null, doubles: 0, extraRoll: false, rumor: false };
+    return { rolled: false, lobbied: false, newsChoice: null, boughtShares: {}, landedOn: null, doubles: 0, extraRoll: false, rumor: false, bankVisit: {} };
   }
 
   // ---------- Игроки ----------
@@ -287,6 +287,8 @@ class Game {
     p.out = true;
     for (const c of Object.values(this.companies)) delete c.owners[p.id];
     this.offers = this.offers.filter((o) => o.sellerId !== p.id);
+    this.trades = this.trades.filter((t) => t.from !== p.id && t.to !== p.id);
+    if (this.auction) { if (this.auction.top && this.auction.top.pid === p.id) this.auction.top = null; this.checkAuctionEnd(); }
     this.addLog(`${p.name} обанкротился (${reason}) и выбывает. Его доли вернулись банку.`);
     const left = this.active();
     if (left.length === 1) this.finish(left[0], 'остался последним');
@@ -419,8 +421,8 @@ class Game {
         const c = free[rnd(free.length)];
         this.auction = { id: this.nextId++, companyId: c.id, starterId: p.id,
           minBid: Math.round(c.price / 10 * CONFIG.auctionMinRate / 500) * 500,
-          endsAt: Date.now() + CONFIG.auctionSeconds * 1000, bids: {} };
-        ev('Аукцион', `открыл аукцион: банк продаёт 10% ${c.name}. Все делают тайные ставки`);
+          endsAt: Date.now() + CONFIG.auctionFirstSeconds * 1000, top: null, passed: [], history: [] };
+        ev('Аукцион', `открыл аукцион: банк продаёт 10% ${c.name}. Торги открытые — кто больше`);
         break;
       }
       case 'exchange': {
@@ -456,49 +458,121 @@ class Game {
     this.turn.rumor = false;
   }
 
-  // ---------- Аукцион ----------
-  bid(pid, amount) {
+  // ---------- Аукцион (открытые торги) ----------
+  // Ставки видны всем. Первая ставка — стартовая цена, дальше повышают шагами (по 100 или больше).
+  // Кто не хочет торговаться — пасует и выходит из торгов. Если 10 секунд никто не повышает, лот уходит лидеру.
+  raise(pid, inc) {
     const a = this.auction;
     if (!a) throw new Error('Аукциона сейчас нет');
     const p = this.player(pid);
     if (!p || p.out) throw new Error('Вы не в игре');
-    if (pid in a.bids) throw new Error('Вы уже сделали ставку');
-    amount = Math.round(Number(amount));
-    if (amount !== 0) {
-      if (!(amount >= a.minBid)) throw new Error(`Минимальная ставка ${fmt(a.minBid)}`);
-      if (amount > p.cash) throw new Error('Столько наличных у вас нет');
-    }
-    a.bids[pid] = amount;
-    if (this.active().every((x) => x.id in a.bids)) this.resolveAuction();
+    if (a.passed.includes(pid)) throw new Error('Вы уже вышли из этих торгов');
+    if (a.top && a.top.pid === pid) throw new Error('Ваша ставка и так самая высокая');
+    let step = Math.round(Number(inc) || CONFIG.auctionStep);
+    step = Math.min(Math.max(step, CONFIG.auctionStep), 100000);
+    const amount = a.top ? a.top.amount + step : a.minBid;
+    if (amount > p.cash) throw new Error('Не хватает наличных на такую ставку');
+    a.top = { pid, amount };
+    a.history.push({ pid, amount });
+    if (a.history.length > 8) a.history.shift();
+    a.endsAt = Date.now() + CONFIG.auctionSeconds * 1000;
+    this.checkAuctionEnd();
+  }
+  passAuction(pid) {
+    const a = this.auction;
+    if (!a) throw new Error('Аукциона сейчас нет');
+    if (a.top && a.top.pid === pid) throw new Error('Вы лидируете — пасовать не нужно');
+    if (!a.passed.includes(pid)) a.passed.push(pid);
+    this.checkAuctionEnd();
+  }
+  // Торги заканчиваются раньше, если повышать больше некому
+  checkAuctionEnd() {
+    const a = this.auction;
+    if (!a) return;
+    const still = this.active().filter((p) => !a.passed.includes(p.id) && !(a.top && a.top.pid === p.id));
+    if (still.length === 0) this.resolveAuction();
   }
   resolveAuction() {
     const a = this.auction;
     if (!a) return;
     this.auction = null;
     const c = this.companies[a.companyId];
-    // при равных ставках выигрывает тот, кто раньше по очереди хода, начиная с открывшего аукцион
-    const order = this.players.map((p, i) => ({ p, i })).filter((x) => !x.p.out);
-    const startIdx = this.players.findIndex((p) => p.id === a.starterId);
-    order.sort((x, y) => ((x.i - startIdx + 99) % this.players.length) - ((y.i - startIdx + 99) % this.players.length));
-    const bids = order.map((x) => ({ p: x.p, v: a.bids[x.p.id] || 0 })).filter((b) => b.v > 0)
-      .sort((x, y) => y.v - x.v);
-    const reveal = order.map((x) => `${x.p.name}: ${a.bids[x.p.id] ? fmt(a.bids[x.p.id]) : 'пас'}`).join(', ');
-    const win = bids.find((b) => b.p.cash >= b.v);
-    if (!win || this.bankShares(c.id) <= 0) {
-      this.lastEvent = { title: 'Аукцион', text: `Никто не купил 10% ${c.name}. Ставки: ${reveal}`, pid: null };
+    const win = a.top && this.player(a.top.pid);
+    if (!win || win.out || win.cash < a.top.amount || this.bankShares(c.id) <= 0) {
+      this.lastEvent = { title: 'Аукцион', text: `Никто не купил 10% ${c.name}`, pid: null };
     } else {
-      win.p.cash -= win.v;
-      this.setShares(win.p.id, c.id, this.sharesOf(win.p.id, c.id) + 1);
-      if (this.current() && this.current().id === win.p.id) this.turn.boughtShares[c.id] = (this.turn.boughtShares[c.id] || 0) + 1;
-      this.lastEvent = { title: 'Аукцион', text: `${win.p.name} купил 10% ${c.name} за ${fmt(win.v)} (по рынку ${fmt(c.price / 10)}). Ставки: ${reveal}`, pid: null };
+      win.cash -= a.top.amount;
+      this.setShares(win.id, c.id, this.sharesOf(win.id, c.id) + 1);
+      if (this.current() && this.current().id === win.id) this.turn.boughtShares[c.id] = (this.turn.boughtShares[c.id] || 0) + 1;
+      this.lastEvent = { title: 'Аукцион', text: `${win.name} выиграл торги: 10% ${c.name} за ${fmt(a.top.amount)} (по рынку ${fmt(c.price / 10)})`, pid: null };
     }
     this.addLog(this.lastEvent.text);
   }
-  // Время аукциона вышло — кто не поставил, тот пас
+  // Время вышло: лот уходит лидеру (или не продаётся, если ставок не было)
   tickAuction(now) {
     if (!this.auction || now < this.auction.endsAt) return false;
     this.resolveAuction();
     return true;
+  }
+
+  // ---------- Обмен долями между игроками ----------
+  // t = { to, giveCid, giveN, getCid, getN, cash } — cash > 0: доплачивает предлагающий, cash < 0: доплачивает получатель
+  proposeTrade(pid, t) {
+    if (this.phase !== 'roll' && this.phase !== 'action') throw new Error('Сейчас нельзя меняться');
+    const a = this.player(pid), b = this.player(t && t.to);
+    if (!a || a.out) throw new Error('Вы не в игре');
+    if (!b || b.out || b.id === pid) throw new Error('Выберите, с кем меняться');
+    if (this.trades.some((x) => x.from === pid)) throw new Error('Сначала дождитесь ответа на прошлое предложение или отмените его');
+    const giveCid = t.giveCid && this.companies[t.giveCid] ? t.giveCid : null;
+    const getCid = t.getCid && this.companies[t.getCid] ? t.getCid : null;
+    const giveN = giveCid ? Math.floor(Number(t.giveN)) : 0;
+    const getN = getCid ? Math.floor(Number(t.getN)) : 0;
+    const cash = Math.round(Number(t.cash) || 0);
+    if (giveCid && !(giveN >= 1)) throw new Error('Укажите, сколько отдаёте');
+    if (getCid && !(getN >= 1)) throw new Error('Укажите, сколько просите');
+    if (!giveCid && !getCid) throw new Error('В обмене должны быть доли хотя бы с одной стороны');
+    if (Math.abs(cash) > 2000000) throw new Error('Слишком большая доплата');
+    if (giveCid && giveN > this.sellable(pid, giveCid)) throw new Error('Столько ваших долей отдать нельзя (купленное в этот ход или выставленное на продажу не считается)');
+    if (getCid && getN > this.sellable(b.id, getCid)) throw new Error(`У ${b.name} нет столько свободных долей этой компании`);
+    if (cash > 0 && a.cash < cash) throw new Error('Не хватает наличных на доплату');
+    const trade = { id: this.nextId++, from: pid, to: b.id, giveCid, giveN, getCid, getN, cash, at: Date.now() };
+    this.trades.push(trade);
+    this.addLog(`${a.name} предложил обмен игроку ${b.name}`);
+    return trade;
+  }
+  cancelTrade(pid, id) {
+    const t = this.trades.find((x) => x.id === Number(id));
+    if (!t || t.from !== pid) throw new Error('Предложение не найдено');
+    this.trades = this.trades.filter((x) => x !== t);
+  }
+  respondTrade(pid, id, accept) {
+    const t = this.trades.find((x) => x.id === Number(id));
+    if (!t || t.to !== pid) throw new Error('Предложение уже неактуально');
+    this.trades = this.trades.filter((x) => x !== t);
+    const a = this.player(t.from), b = this.player(t.to);
+    const desc = this.tradeText(t);
+    if (!accept) { this.addLog(`${b.name} отказался от обмена с ${a.name}`); return; }
+    if (a.out || b.out) throw new Error('Один из игроков уже выбыл');
+    if (t.giveCid && t.giveN > this.sellable(a.id, t.giveCid)) throw new Error(`У ${a.name} уже нет этих долей`);
+    if (t.getCid && t.getN > this.sellable(b.id, t.getCid)) throw new Error('У вас уже нет этих долей');
+    if (t.cash > 0 && a.cash < t.cash) throw new Error(`У ${a.name} не хватает денег на доплату`);
+    if (t.cash < 0 && b.cash < -t.cash) throw new Error('Не хватает наличных на доплату');
+    if (t.giveCid) { this.setShares(a.id, t.giveCid, this.sharesOf(a.id, t.giveCid) - t.giveN); this.setShares(b.id, t.giveCid, this.sharesOf(b.id, t.giveCid) + t.giveN); }
+    if (t.getCid) { this.setShares(b.id, t.getCid, this.sharesOf(b.id, t.getCid) - t.getN); this.setShares(a.id, t.getCid, this.sharesOf(a.id, t.getCid) + t.getN); }
+    a.cash -= t.cash; b.cash += t.cash;
+    if (t.giveCid) this.trimOffers(a.id, t.giveCid);
+    if (t.getCid) this.trimOffers(b.id, t.getCid);
+    this.lastEvent = { title: 'Обмен', text: `${a.name} и ${b.name} договорились: ${desc}`, pid: null };
+    this.addLog(this.lastEvent.text);
+  }
+  tradeText(t) {
+    const a = this.player(t.from), b = this.player(t.to);
+    const parts = [];
+    if (t.giveCid) parts.push(`${a.name} отдаёт ${t.giveN * 10}% ${this.companies[t.giveCid].name}`);
+    if (t.getCid) parts.push(`${b.name} отдаёт ${t.getN * 10}% ${this.companies[t.getCid].name}`);
+    if (t.cash > 0) parts.push(`${a.name} доплачивает ${fmt(t.cash)}`);
+    if (t.cash < 0) parts.push(`${b.name} доплачивает ${fmt(-t.cash)}`);
+    return parts.join(', ');
   }
 
   // Пропустить ход игрока, который отключился
@@ -578,12 +652,14 @@ class Game {
     if (!this.turn.rolled || cell.type !== 'company' || cell.id !== cid) throw new Error('Купить у банка можно только компанию, на клетке которой вы стоите');
     const c = this.companies[cid];
     if (this.bankShares(cid) <= 0) throw new Error('У банка не осталось свободных долей');
-    if ((p.bankBought[cid] || 0) >= CONFIG.bankLimitShares) throw new Error('У банка можно купить не больше 20% одной компании. Остальное — только у игроков');
+    if ((p.bankBought[cid] || 0) >= CONFIG.bankLimitShares) throw new Error('У банка можно купить не больше 30% одной компании за игру. Остальное — только у игроков');
+    if ((this.turn.bankVisit[cid] || 0) >= CONFIG.bankPerVisit) throw new Error('За одно попадание у банка можно купить не больше 20%. Ещё 10% — в следующий раз');
     const cost = Math.round(c.price / 10);
     if (p.cash < cost) throw new Error('Не хватает наличных');
     p.cash -= cost;
     this.setShares(pid, cid, this.sharesOf(pid, cid) + 1);
     p.bankBought[cid] = (p.bankBought[cid] || 0) + 1;
+    this.turn.bankVisit[cid] = (this.turn.bankVisit[cid] || 0) + 1;
     this.turn.boughtShares[cid] = (this.turn.boughtShares[cid] || 0) + 1;
     this.addLog(`${p.name} купил 10% ${c.name} у банка за ${fmt(cost)}`);
   }
@@ -754,7 +830,7 @@ class Game {
       hostId: this.hostId,
       me: pid,
       config: { winCash: CONFIG.winCash, winCapital: CONFIG.winCapital, maxPlayers: CONFIG.maxPlayers,
-        bankLimitShares: CONFIG.bankLimitShares, lobbyRate: CONFIG.lobbyRate, bankSellDiscount: CONFIG.bankSellDiscount,
+        bankLimitShares: CONFIG.bankLimitShares, bankPerVisit: CONFIG.bankPerVisit, auctionStep: CONFIG.auctionStep, lobbyRate: CONFIG.lobbyRate, bankSellDiscount: CONFIG.bankSellDiscount,
         taxCell: CONFIG.taxCell, bankDeal: CONFIG.bankDeal, salary: CONFIG.salary, rentRate: CONFIG.rentRate },
       board: BOARD,
       industries: INDUSTRIES,
@@ -775,9 +851,10 @@ class Game {
       offers: this.offers,
       auction: this.auction ? {
         id: this.auction.id, companyId: this.auction.companyId, starterId: this.auction.starterId,
-        minBid: this.auction.minBid, endsAt: this.auction.endsAt,
-        bidders: Object.keys(this.auction.bids), myBid: pid in this.auction.bids ? this.auction.bids[pid] : null,
+        minBid: this.auction.minBid, endsAt: this.auction.endsAt, top: this.auction.top,
+        passed: this.auction.passed, history: this.auction.history,
       } : null,
+      trades: this.trades.filter((t) => t.from === pid || t.to === pid),
       news: this.news.map((n) => {
         const known = me && n.knownBy.includes(pid);
         const turnsLeft = Math.max(0, n.triggerTurn - this.globalTurn);

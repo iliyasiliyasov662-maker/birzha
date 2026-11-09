@@ -21,22 +21,44 @@ function newsScore(g, pid, n) {
   return 0.2; // слияние — непредсказуемо
 }
 
-// Ставки ботов на аукционе: по одному боту за шаг, чтобы ставки появлялись постепенно
-function botBids(g) {
+// Открытый аукцион: каждый бот заранее решает, сколько максимум готов заплатить,
+// и повышает, пока цена ниже этого предела. Один бот за шаг — так ставки идут постепенно.
+function botAuctionStep(g) {
   const a = g.auction;
   if (!a) return false;
+  a.botMax = a.botMax || {};
+  const value = valueOf10(g, a.companyId);
   for (const p of g.active()) {
-    if (!p.isBot || p.id in a.bids) continue;
-    const value = valueOf10(g, a.companyId);
-    let v = 0;
-    if (p.cash - value >= RESERVE && Math.random() < 0.8) {
-      v = Math.round(value * (0.7 + Math.random() * 0.45) / 500) * 500;
-      if (v < a.minBid || v > p.cash) v = 0;
+    if (!p.isBot || a.passed.includes(p.id) || (a.top && a.top.pid === p.id)) continue;
+    if (!(p.id in a.botMax)) {
+      a.botMax[p.id] = p.cash - value >= RESERVE ? Math.round(value * (0.75 + Math.random() * 0.45) / 100) * 100 : 0;
     }
-    g.bid(p.id, v);
+    const max = Math.min(a.botMax[p.id], p.cash - RESERVE / 2);
+    const next = a.top ? a.top.amount + CONFIG.auctionStep : a.minBid;
+    if (next <= max) {
+      const gap = max - (a.top ? a.top.amount : a.minBid);
+      g.raise(p.id, gap > 3000 && Math.random() < 0.6 ? 1000 : CONFIG.auctionStep);
+    } else {
+      g.passAuction(p.id);
+    }
     return true;
   }
   return false;
+}
+
+// Ответ ботов на предложения обмена: соглашаются, если получают по рынку хотя бы на 5% больше, чем отдают
+function botTrades(g) {
+  const t = g.trades.find((x) => { const p = g.player(x.to); return p && p.isBot; });
+  if (!t) return false;
+  const bot = g.player(t.to);
+  const val = (cid, n) => (cid ? n * valueOf10(g, cid) : 0);
+  const gets = val(t.giveCid, t.giveN) + Math.max(0, t.cash);
+  const gives = val(t.getCid, t.getN) + Math.max(0, -t.cash);
+  let ok = gets >= gives * 1.05;
+  if (t.getCid && g.sharesOf(bot.id, t.getCid) >= 6 && g.sharesOf(bot.id, t.getCid) - t.getN < 6) ok = ok && gets >= gives * 1.4; // контрольный пакет просто так не отдаёт
+  if (t.cash < 0 && bot.cash + t.cash < RESERVE) ok = false;
+  try { g.respondTrade(bot.id, t.id, ok); } catch (e) { try { g.respondTrade(bot.id, t.id, false); } catch (e2) { /* уже неактуально */ } }
+  return true;
 }
 
 // Один шаг бота, чей сейчас ход. Возвращает паузу до следующего шага в мс, или null, если делать нечего.
@@ -71,7 +93,7 @@ function botStep(g) {
   const cell = BOARD[p.pos];
   if (cell.type === 'company') {
     const c = g.companies[cell.id];
-    if (g.bankShares(c.id) > 0 && (p.bankBought[c.id] || 0) < CONFIG.bankLimitShares && p.cash - c.price / 10 >= RESERVE) {
+    if (g.bankShares(c.id) > 0 && (p.bankBought[c.id] || 0) < CONFIG.bankLimitShares && (t.bankVisit[c.id] || 0) < CONFIG.bankPerVisit && p.cash - c.price / 10 >= RESERVE) {
       g.buyFromBank(id, c.id);
       return 1300;
     }
@@ -106,4 +128,4 @@ function botStep(g) {
   return 1200;
 }
 
-module.exports = { botStep, botBids };
+module.exports = { botStep, botAuctionStep, botTrades };
