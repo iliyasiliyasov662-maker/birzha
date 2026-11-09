@@ -365,6 +365,8 @@ function centerTop() {
   if (S.anim && S.anim.rolling) h += `<div class="dice rolling" id="dice">${die(rnd6())}${die(rnd6())}</div>`;
   else if (S.anim) h += `<div class="dice" id="dice">${die(S.anim.dice[0])}${die(S.anim.dice[1])}</div>`;
   else if (v.dice) h += `<div class="dice" id="dice">${die(v.dice[0])}${die(v.dice[1])}</div>`;
+  // На телефоне в центре поля — последние записи журнала, чтобы видеть, что происходит, без переключения вкладок
+  if (isMobile() && v.log.length) h += `<div class="mlog">${[...v.log].slice(-4).reverse().map((l) => `<div>${colorize(l.text)}</div>`).join('')}</div>`;
   return h;
 }
 
