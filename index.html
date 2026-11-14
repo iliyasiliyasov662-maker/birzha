@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Avalon — Круглый стол</title>
+  <meta name="description" content="Авалон: игра в скрытые роли для 5–10 игроков. Играйте онлайн с друзьями прямо в браузере.">
+  <meta name="theme-color" content="#0b0f1c">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 18 L4 7 L9 12 L12 4 L15 12 L20 7 L21 18 Z' fill='%23f4c542'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="bg" aria-hidden="true"><div class="stars"></div><div class="fog"></div></div>
+
+  <header id="topbar" class="hidden">
+    <div class="brand">AVALON</div>
+    <div id="roomInfo"></div>
+    <div class="top-actions">
+      <button class="icon-btn" id="btnSound" title="Звук"></button>
+      <button class="icon-btn txt" id="btnRules" title="Правила">?</button>
+      <button class="icon-btn txt" id="btnMenu" title="Меню">☰</button>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true"><div class="overlay-inner" id="overlayInner"></div></div>
+  <div id="toasts"></div>
+
+  <script src="js/vendor/peerjs.min.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/bots.js"></script>
+  <script src="js/art.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/sound.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
